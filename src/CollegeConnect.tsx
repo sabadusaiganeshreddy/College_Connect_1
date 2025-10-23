@@ -381,11 +381,6 @@ export default function CollegeConnect() {
     return domain.replace(/\./g, '_');
   };
 
-  // Convert Firebase key back to domain
-  const keyToDomain = (key: string): string => {
-    return key.replace(/_/g, '.');
-  };
-
   const handleRegister = () => {
     if (!email || !name || !linkedin) {
       alert('Please fill all fields');
