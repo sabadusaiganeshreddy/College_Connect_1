@@ -38,4 +38,4 @@ A React application for connecting students across colleges and tracking company
 - TypeScript
 - Vite
 - Tailwind CSS
-- Lucide Icons
+
