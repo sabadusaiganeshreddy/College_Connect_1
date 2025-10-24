@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Building2, GraduationCap, Users, Plus, CheckCircle, ExternalLink, Calendar, Briefcase, LogOut, User, Award, ArrowLeft, Loader2 } from 'lucide-react';
+import { Search, Building2, GraduationCap, Users, Plus, CheckCircle, ExternalLink, Calendar, Briefcase, LogOut, User, Award, ArrowLeft, Loader2, Linkedin } from 'lucide-react';
 import { database } from './firebase';
 import { ref, set, onValue } from 'firebase/database';
 
@@ -26,6 +26,7 @@ interface CompanyVisit {
   jobRoles?: string[];
   addedBy: number;
   selectedStudents: number[];
+  totalSelections?: number; // Total number of students selected by company
   addedAt: string;
 }
 
@@ -60,12 +61,26 @@ export default function CollegeConnect() {
   const [linkedin, setLinkedin] = useState('');
   const [newCollegeName, setNewCollegeName] = useState('');
   
+  // OTP verification
+  const [showOtpVerification, setShowOtpVerification] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [otpExpiry, setOtpExpiry] = useState<number | null>(null);
+  const [pendingRegistrationData, setPendingRegistrationData] = useState<{
+    email: string;
+    name: string;
+    linkedin: string;
+    domain: string;
+    domainKey: string;
+  } | null>(null);
+  
   // Add company form
   const [showAddCompany, setShowAddCompany] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [visitDate, setVisitDate] = useState('');
   const [jobRoles, setJobRoles] = useState('');
   const [selectedForCompany, setSelectedForCompany] = useState(false);
+  const [numberOfSelections, setNumberOfSelections] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
 
@@ -77,84 +92,11 @@ export default function CollegeConnect() {
     // Set a timeout to prevent infinite loading (reduced to 3 seconds)
     const timeout = setTimeout(() => {
       if (mounted && isLoading) {
-        console.warn('Firebase connection timeout - loading demo data');
+        console.warn('Firebase connection timeout - using empty data');
         setFirebaseError('Could not connect to Firebase. Using local data.');
-        // Initialize with demo data
-        const demoData: CollegesData = {
-          'iitd_ac_in': {
-            name: 'IIT Delhi',
-            domain: 'iitd.ac.in',
-            createdAt: new Date().toISOString(),
-            students: [
-              { 
-                id: 1, 
-                name: 'Rahul Sharma', 
-                email: 'rahul@iitd.ac.in', 
-                linkedin: 'linkedin.com/in/rahul-sharma', 
-                collegeDomain: 'iitd.ac.in',
-                selections: [{ companyName: 'Google', selectedAt: new Date().toISOString() }],
-                registeredAt: new Date().toISOString()
-              }
-            ],
-            companies: [
-              { 
-                id: 1,
-                name: 'Google', 
-                addedBy: 1, 
-                selectedStudents: [1],
-                visitDate: '2025-01-15',
-                jobRoles: ['Software Engineer', 'Product Manager'],
-                addedAt: new Date().toISOString()
-              },
-              { 
-                id: 2,
-                name: 'Microsoft', 
-                addedBy: 1, 
-                selectedStudents: [],
-                visitDate: '2025-02-20',
-                jobRoles: ['Software Development Engineer'],
-                addedAt: new Date().toISOString()
-              }
-            ]
-          },
-          'bits-pilani.ac.in': {
-            name: 'BITS Pilani',
-            domain: 'bits-pilani.ac.in',
-            createdAt: new Date().toISOString(),
-            students: [
-              { 
-                id: 2, 
-                name: 'Priya Verma', 
-                email: 'priya@bits-pilani.ac.in', 
-                linkedin: 'linkedin.com/in/priya-verma',
-                collegeDomain: 'bits-pilani.ac.in',
-                selections: [{ companyName: 'Amazon', selectedAt: new Date().toISOString() }],
-                registeredAt: new Date().toISOString()
-              }
-            ],
-            companies: [
-              { 
-                id: 3,
-                name: 'Google', 
-                addedBy: 2, 
-                selectedStudents: [],
-                visitDate: '2025-01-10',
-                jobRoles: ['Software Engineer'],
-                addedAt: new Date().toISOString()
-              },
-              { 
-                id: 4,
-                name: 'Amazon', 
-                addedBy: 2, 
-                selectedStudents: [2],
-                visitDate: '2025-03-05',
-                jobRoles: ['SDE-1', 'SDE-2'],
-                addedAt: new Date().toISOString()
-              }
-            ]
-          }
-        };
-        setColleges(demoData);
+        // Initialize with empty data
+        const emptyData: CollegesData = {};
+        setColleges(emptyData);
         setIsLoading(false);
       }
     }, 3000); // 3 second timeout
@@ -199,85 +141,9 @@ export default function CollegeConnect() {
             setFirebaseError(null);
           }
         } else {
-          // Initialize with demo data if no data exists
-          const demoData: CollegesData = {
-            'iitd_ac_in': {
-              name: 'IIT Delhi',
-              domain: 'iitd.ac.in',
-              createdAt: new Date().toISOString(),
-              students: [
-                { 
-                  id: 1, 
-                  name: 'Rahul Sharma', 
-                  email: 'rahul@iitd.ac.in', 
-                  linkedin: 'linkedin.com/in/rahul-sharma', 
-                  collegeDomain: 'iitd.ac.in',
-                  selections: [{ companyName: 'Google', selectedAt: new Date().toISOString() }],
-                  registeredAt: new Date().toISOString()
-                }
-              ],
-              companies: [
-                { 
-                  id: 1,
-                  name: 'Google', 
-                  addedBy: 1, 
-                  selectedStudents: [1],
-                  visitDate: '2025-01-15',
-                  jobRoles: ['Software Engineer', 'Product Manager'],
-                  addedAt: new Date().toISOString()
-                },
-                { 
-                  id: 2,
-                  name: 'Microsoft', 
-                  addedBy: 1, 
-                  selectedStudents: [],
-                  visitDate: '2025-02-20',
-                  jobRoles: ['Software Development Engineer'],
-                  addedAt: new Date().toISOString()
-                }
-              ]
-            },
-            'bits-pilani_ac_in': {
-              name: 'BITS Pilani',
-              domain: 'bits-pilani.ac.in',
-              createdAt: new Date().toISOString(),
-              students: [
-                { 
-                  id: 2, 
-                  name: 'Priya Verma', 
-                  email: 'priya@bits-pilani.ac.in', 
-                  linkedin: 'linkedin.com/in/priya-verma',
-                  collegeDomain: 'bits-pilani.ac.in',
-                  selections: [{ companyName: 'Amazon', selectedAt: new Date().toISOString() }],
-                  registeredAt: new Date().toISOString()
-                }
-              ],
-              companies: [
-                { 
-                  id: 3,
-                  name: 'Google', 
-                  addedBy: 2, 
-                  selectedStudents: [],
-                  visitDate: '2025-01-10',
-                  jobRoles: ['Software Engineer'],
-                  addedAt: new Date().toISOString()
-                },
-                { 
-                  id: 4,
-                  name: 'Amazon', 
-                  addedBy: 2, 
-                  selectedStudents: [2],
-                  visitDate: '2025-03-05',
-                  jobRoles: ['SDE-1', 'SDE-2'],
-                  addedAt: new Date().toISOString()
-                }
-              ]
-            }
-          };
-          set(collegesRef, demoData).catch(err => {
-            console.error('Firebase write error:', err);
-            setFirebaseError('Firebase write permission denied. Using local data only.');
-          });
+          // Initialize with empty data if no data exists
+          const emptyData: CollegesData = {};
+          setColleges(emptyData);
         }
         setIsLoading(false);
       },
@@ -285,46 +151,9 @@ export default function CollegeConnect() {
         clearTimeout(timeout);
         console.error('Firebase error:', error);
         setFirebaseError(`Firebase error: ${error.message}`);
-        // Load demo data on error
-        const demoData: CollegesData = {
-          'iitd_ac_in': {
-            name: 'IIT Delhi',
-            domain: 'iitd.ac.in',
-            createdAt: new Date().toISOString(),
-            students: [
-              { 
-                id: 1, 
-                name: 'Rahul Sharma', 
-                email: 'rahul@iitd.ac.in', 
-                linkedin: 'linkedin.com/in/rahul-sharma', 
-                collegeDomain: 'iitd.ac.in',
-                selections: [{ companyName: 'Google', selectedAt: new Date().toISOString() }],
-                registeredAt: new Date().toISOString()
-              }
-            ],
-            companies: [
-              { 
-                id: 1,
-                name: 'Google', 
-                addedBy: 1, 
-                selectedStudents: [1],
-                visitDate: '2025-01-15',
-                jobRoles: ['Software Engineer', 'Product Manager'],
-                addedAt: new Date().toISOString()
-              },
-              { 
-                id: 2,
-                name: 'Microsoft', 
-                addedBy: 1, 
-                selectedStudents: [],
-                visitDate: '2025-02-20',
-                jobRoles: ['Software Development Engineer'],
-                addedAt: new Date().toISOString()
-              }
-            ]
-          }
-        };
-        setColleges(demoData);
+        // Initialize with empty data on error
+        const emptyData: CollegesData = {};
+        setColleges(emptyData);
         setIsLoading(false);
       }
     );
@@ -381,6 +210,33 @@ export default function CollegeConnect() {
     return domain.replace(/\./g, '_');
   };
 
+  // Generate 6-digit OTP
+  const generateOtp = (): string => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  };
+
+  // Send OTP (simulated - in production, use email service)
+  const sendOtp = (email: string, otp: string) => {
+    // In production, integrate with an email service like SendGrid, AWS SES, etc.
+    console.log(`OTP for ${email}: ${otp}`);
+    alert(`OTP sent to ${email}\n\nFor demo purposes, your OTP is: ${otp}\n\n(In production, this would be sent via email)`);
+  };
+
+  // Verify OTP
+  const verifyOtp = (enteredOtp: string): boolean => {
+    if (!otpExpiry || Date.now() > otpExpiry) {
+      alert('OTP has expired. Please request a new one.');
+      return false;
+    }
+    
+    if (enteredOtp === generatedOtp) {
+      return true;
+    }
+    
+    alert('Invalid OTP. Please try again.');
+    return false;
+  };
+
   const handleRegister = () => {
     if (!email || !name || !linkedin) {
       alert('Please fill all fields');
@@ -403,22 +259,58 @@ export default function CollegeConnect() {
       return;
     }
 
-    const domainKey = domainToKey(domain); // Convert to Firebase-safe key
+    const domainKey = domainToKey(domain);
 
-    // Check if college exists
+    // Check if user already registered
     const existingCollege = colleges[domainKey];
+    if (existingCollege) {
+      const existingStudent = existingCollege.students.find(s => s.email === email);
+      if (existingStudent) {
+        alert('This email is already registered!');
+        setCurrentUser(existingStudent);
+        setView('dashboard');
+        return;
+      }
+    }
+
+    // Generate and send OTP
+    const newOtp = generateOtp();
+    setGeneratedOtp(newOtp);
+    setOtpExpiry(Date.now() + 5 * 60 * 1000); // OTP valid for 5 minutes
     
-    if (!existingCollege) {
-      setView('addCollege');
+    // Store pending registration data
+    setPendingRegistrationData({
+      email,
+      name,
+      linkedin,
+      domain,
+      domainKey
+    });
+
+    // Send OTP
+    sendOtp(email, newOtp);
+    
+    // Show OTP verification screen
+    setShowOtpVerification(true);
+  };
+
+  const handleVerifyOtp = () => {
+    if (!verifyOtp(otp)) {
       return;
     }
 
-    // Check if user already registered
-    const existingStudent = existingCollege.students.find(s => s.email === email);
-    if (existingStudent) {
-      alert('This email is already registered!');
-      setCurrentUser(existingStudent);
-      setView('dashboard');
+    if (!pendingRegistrationData) {
+      alert('Registration data not found. Please try again.');
+      return;
+    }
+
+    const { email, name, linkedin, domain, domainKey } = pendingRegistrationData;
+    const existingCollege = colleges[domainKey];
+    
+    if (!existingCollege) {
+      // College doesn't exist, go to add college view
+      setShowOtpVerification(false);
+      setView('addCollege');
       return;
     }
 
@@ -443,9 +335,26 @@ export default function CollegeConnect() {
 
     setCurrentUser(newStudent);
     setView('dashboard');
+    setShowOtpVerification(false);
+    setOtp('');
+    setGeneratedOtp('');
+    setPendingRegistrationData(null);
     setEmail('');
     setName('');
     setLinkedin('');
+  };
+
+  const handleResendOtp = () => {
+    if (!pendingRegistrationData) {
+      alert('Registration data not found. Please start over.');
+      return;
+    }
+
+    const newOtp = generateOtp();
+    setGeneratedOtp(newOtp);
+    setOtpExpiry(Date.now() + 5 * 60 * 1000);
+    sendOtp(pendingRegistrationData.email, newOtp);
+    setOtp('');
   };
 
   const handleAddCollege = () => {
@@ -492,11 +401,26 @@ export default function CollegeConnect() {
   };
 
   const handleAddCompany = () => {
-    if (!companyName || !currentUser) return;
+    if (!companyName || !currentUser) {
+      alert('Please fill all required fields');
+      return;
+    }
 
-    const domainKey = domainToKey(currentUser.collegeDomain); // Convert to Firebase-safe key
-    const collegeData = colleges[domainKey];
-    const existingCompany = collegeData.companies.find(c => c.name.toLowerCase() === companyName.toLowerCase());
+    // Get myCollege dynamically inside the function
+    const domainKey = domainToKey(currentUser.collegeDomain);
+    const myCollege = colleges[domainKey];
+
+    if (!myCollege) {
+      console.error('College not found for domain:', currentUser.collegeDomain);
+      alert('Error: Your college data could not be found. Please try logging in again.');
+      return;
+    }
+
+    if (!myCollege.companies) {
+      myCollege.companies = [];
+    }
+
+    const existingCompany = myCollege.companies.find(c => c.name.toLowerCase() === companyName.toLowerCase());
 
     if (existingCompany) {
       alert('Company already added to this college');
@@ -510,25 +434,26 @@ export default function CollegeConnect() {
       selectedStudents: selectedForCompany ? [currentUser.id] : [],
       visitDate: visitDate || undefined,
       jobRoles: jobRoles ? jobRoles.split(',').map(r => r.trim()).filter(r => r) : undefined,
+      totalSelections: numberOfSelections ? parseInt(numberOfSelections) : undefined,
       addedAt: new Date().toISOString()
     };
 
     const updatedColleges = {
       ...colleges,
       [domainKey]: {
-        ...collegeData,
-        companies: [...collegeData.companies, newCompany]
+        ...myCollege,
+        companies: [...myCollege.companies, newCompany]
       }
     };
 
     // Update student selections if they marked themselves as selected
     if (selectedForCompany) {
-      const studentIndex = collegeData.students.findIndex(s => s.id === currentUser.id);
+      const studentIndex = myCollege.students.findIndex((s: Student) => s.id === currentUser.id);
       if (studentIndex !== -1) {
-        const updatedStudents = [...collegeData.students];
+        const updatedStudents = [...myCollege.students];
         updatedStudents[studentIndex] = {
           ...updatedStudents[studentIndex],
-          selections: [...updatedStudents[studentIndex].selections, {
+          selections: [...(updatedStudents[studentIndex].selections || []), {
             companyName,
             selectedAt: new Date().toISOString()
           }]
@@ -545,44 +470,53 @@ export default function CollegeConnect() {
     setVisitDate('');
     setJobRoles('');
     setSelectedForCompany(false);
+    setNumberOfSelections('');
     setShowAddCompany(false);
   };
 
   const toggleSelection = (companyName: string) => {
     if (!currentUser) return;
 
-    const domainKey = domainToKey(currentUser.collegeDomain); // Convert to Firebase-safe key
-    const collegeData = colleges[domainKey];
-    const companyIndex = collegeData.companies.findIndex(c => c.name === companyName);
+    // Get myCollege dynamically inside the function
+    const domainKey = domainToKey(currentUser.collegeDomain);
+    const myCollege = colleges[domainKey];
+
+    if (!myCollege) {
+      console.error('College not found for domain:', currentUser.collegeDomain);
+      alert('Error: Your college data could not be found. Please try logging in again.');
+      return;
+    }
+
+    const companyIndex = myCollege.companies.findIndex(c => c.name === companyName);
     
     if (companyIndex === -1) return;
 
-    const company = collegeData.companies[companyIndex];
-    const isSelected = company.selectedStudents.includes(currentUser.id);
+    const company = myCollege.companies[companyIndex];
+    const isSelected = (company.selectedStudents || []).includes(currentUser.id);
     
-    const updatedCompanies = [...collegeData.companies];
+    const updatedCompanies = [...myCollege.companies];
     updatedCompanies[companyIndex] = {
       ...company,
       selectedStudents: isSelected 
-        ? company.selectedStudents.filter(id => id !== currentUser.id)
-        : [...company.selectedStudents, currentUser.id]
+        ? (company.selectedStudents || []).filter(id => id !== currentUser.id)
+        : [...(company.selectedStudents || []), currentUser.id]
     };
 
     // Update student selections
-    const studentIndex = collegeData.students.findIndex(s => s.id === currentUser.id);
-    const updatedStudents = [...collegeData.students];
+    const studentIndex = myCollege.students.findIndex((s: Student) => s.id === currentUser.id);
+    const updatedStudents = [...myCollege.students];
     
     if (isSelected) {
       // Remove selection
       updatedStudents[studentIndex] = {
         ...updatedStudents[studentIndex],
-        selections: updatedStudents[studentIndex].selections.filter(s => s.companyName !== companyName)
+        selections: (updatedStudents[studentIndex].selections || []).filter(s => s.companyName !== companyName)
       };
     } else {
       // Add selection
       updatedStudents[studentIndex] = {
         ...updatedStudents[studentIndex],
-        selections: [...updatedStudents[studentIndex].selections, {
+        selections: [...(updatedStudents[studentIndex].selections || []), {
           companyName,
           selectedAt: new Date().toISOString()
         }]
@@ -592,7 +526,7 @@ export default function CollegeConnect() {
     setColleges({
       ...colleges,
       [domainKey]: {
-        ...collegeData,
+        ...myCollege,
         companies: updatedCompanies,
         students: updatedStudents
       }
@@ -614,11 +548,13 @@ export default function CollegeConnect() {
     } else {
       const results: CompanySearchResult[] = [];
       Object.values(colleges).forEach(college => {
-        const matchingCompanies = college.companies.filter(company =>
-          company.name.toLowerCase().includes(query)
-        );
-        if (matchingCompanies.length > 0) {
-          results.push({ college, companies: matchingCompanies });
+        if (college.companies && Array.isArray(college.companies)) {
+          const matchingCompanies = college.companies.filter(company =>
+            company.name.toLowerCase().includes(query)
+          );
+          if (matchingCompanies.length > 0) {
+            results.push({ college, companies: matchingCompanies });
+          }
         }
       });
       return results;
@@ -638,8 +574,10 @@ export default function CollegeConnect() {
 
   const getStudentById = (studentId: number): Student | null => {
     for (const college of Object.values(colleges)) {
-      const student = college.students.find(s => s.id === studentId);
-      if (student) return student;
+      if (college && college.students && Array.isArray(college.students)) {
+        const student = college.students.find(s => s.id === studentId);
+        if (student) return student;
+      }
     }
     return null;
   };
@@ -659,8 +597,86 @@ export default function CollegeConnect() {
     );
   }
 
+  // Check if currentUser exists but their college data is not loaded
+  if (currentUser && !myCollege && view !== 'login') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-16 h-16 mx-auto text-indigo-600 animate-spin mb-4" />
+          <p className="text-gray-600 text-lg">Loading your college data...</p>
+          <button
+            onClick={handleLogout}
+            className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+          >
+            Logout and try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Login view
   if (view === 'login') {
+    // Show OTP verification screen
+    if (showOtpVerification) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+            <div className="text-center mb-8">
+              <GraduationCap className="w-16 h-16 mx-auto text-indigo-600 mb-4" />
+              <h1 className="text-3xl font-bold text-gray-900">Verify OTP</h1>
+              <p className="text-gray-600 mt-2">Enter the OTP sent to {pendingRegistrationData?.email}</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="otp-input" className="block text-sm font-medium text-gray-700 mb-2">Enter OTP</label>
+                <input
+                  id="otp-input"
+                  name="otp"
+                  type="text"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  maxLength={6}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-center text-2xl tracking-widest"
+                  placeholder="000000"
+                />
+                <p className="text-xs text-gray-500 mt-1">OTP is valid for 5 minutes</p>
+              </div>
+
+              <button
+                onClick={handleVerifyOtp}
+                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition"
+              >
+                Verify OTP
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleResendOtp}
+                  className="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-200 transition"
+                >
+                  Resend OTP
+                </button>
+                <button
+                  onClick={() => {
+                    setShowOtpVerification(false);
+                    setOtp('');
+                    setGeneratedOtp('');
+                    setPendingRegistrationData(null);
+                  }}
+                  className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg font-medium hover:bg-red-100 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Show registration form
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
@@ -686,8 +702,10 @@ export default function CollegeConnect() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+              <label htmlFor="register-name" className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
               <input
+                id="register-name"
+                name="name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -697,8 +715,10 @@ export default function CollegeConnect() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">College Email</label>
+              <label htmlFor="register-email" className="block text-sm font-medium text-gray-700 mb-2">College Email</label>
               <input
+                id="register-email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -709,8 +729,10 @@ export default function CollegeConnect() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">LinkedIn Profile</label>
+              <label htmlFor="register-linkedin" className="block text-sm font-medium text-gray-700 mb-2">LinkedIn Profile</label>
               <input
+                id="register-linkedin"
+                name="linkedin"
                 type="text"
                 value={linkedin}
                 onChange={(e) => setLinkedin(e.target.value)}
@@ -745,8 +767,10 @@ export default function CollegeConnect() {
 
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">College Name</label>
+              <label htmlFor="college-name" className="block text-sm font-medium text-gray-700 mb-2">College Name</label>
               <input
+                id="college-name"
+                name="collegeName"
                 type="text"
                 value={newCollegeName}
                 onChange={(e) => setNewCollegeName(e.target.value)}
@@ -802,7 +826,7 @@ export default function CollegeConnect() {
                 <p className="text-gray-600 mb-2">{student.email}</p>
                 <p className="text-indigo-600 font-medium mb-3">{studentCollege.name}</p>
                 <a
-                  href={`https://${student.linkedin}`}
+                  href={student.linkedin.startsWith('http') ? student.linkedin : `https://${student.linkedin}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
@@ -818,7 +842,7 @@ export default function CollegeConnect() {
                 <Award className="w-6 h-6 text-yellow-500" />
                 Company Selections
               </h2>
-              {student.selections.length > 0 ? (
+              {student.selections && student.selections.length > 0 ? (
                 <div className="space-y-3">
                   {student.selections.map((selection, idx) => {
                     const company = studentCollege.companies.find(c => c.name === selection.companyName);
@@ -861,6 +885,83 @@ export default function CollegeConnect() {
     );
   }
 
+  // My Profile view
+  if (view === 'profile' && currentUser) {
+    console.log('Rendering profile view for:', currentUser.name);
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-4xl mx-auto px-4 py-8">
+          <button
+            onClick={() => setView('dashboard')}
+            className="flex items-center gap-2 text-indigo-600 hover:text-indigo-700 mb-6"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            Back to Dashboard
+          </button>
+
+          <div className="bg-white rounded-lg shadow-md p-8">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center">
+                <User className="w-10 h-10 text-indigo-600" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">{currentUser.name}</h1>
+                <p className="text-gray-600">{currentUser.email}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-6">
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">College</h3>
+                <p className="text-lg text-gray-900">{myCollege?.name}</p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">LinkedIn Profile</h3>
+                {currentUser.linkedin ? (
+                  <a
+                    href={currentUser.linkedin.startsWith('http') ? currentUser.linkedin : `https://${currentUser.linkedin}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-700 flex items-center gap-2"
+                  >
+                    <Linkedin className="w-5 h-5" />
+                    View LinkedIn Profile
+                  </a>
+                ) : (
+                  <p className="text-gray-600">No LinkedIn profile added</p>
+                )}
+              </div>
+
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Member Since</h3>
+                <p className="text-gray-900">{new Date(currentUser.registeredAt).toLocaleDateString()}</p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-medium text-gray-500 mb-3">Company Selections ({currentUser.selections?.length || 0})</h3>
+                {currentUser.selections && currentUser.selections.length > 0 ? (
+                  <div className="space-y-2">
+                    {currentUser.selections.map((sel, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                        <span className="font-medium text-gray-900">{sel.companyName}</span>
+                        <span className="text-sm text-gray-600">
+                          {new Date(sel.selectedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-600">No selections yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Dashboard view
   return (
     <div className="min-h-screen bg-gray-50">
@@ -874,8 +975,12 @@ export default function CollegeConnect() {
             </div>
             <div className="flex items-center gap-4">
               <button
-                onClick={() => setView('profile')}
-                className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+                type="button"
+                onClick={() => {
+                  console.log('Profile button clicked');
+                  setView('profile');
+                }}
+                className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition cursor-pointer"
               >
                 <User className="w-5 h-5" />
                 <div className="text-left">
@@ -923,6 +1028,8 @@ export default function CollegeConnect() {
           <div className="relative">
             <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
             <input
+              id="search-query"
+              name="searchQuery"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -950,7 +1057,7 @@ export default function CollegeConnect() {
                             <div className="flex flex-wrap gap-2">
                               {college.companies.map((company) => (
                                 <span key={company.id} className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">
-                                  {company.name} ({company.selectedStudents.length} selected)
+                                  {company.name} ({company.totalSelections !== undefined ? company.totalSelections : (company.selectedStudents || []).length} selected)
                                 </span>
                               ))}
                               {college.companies.length === 0 && (
@@ -1004,7 +1111,9 @@ export default function CollegeConnect() {
                                   </div>
                                 )}
                                 <p className="text-sm text-green-700 mt-2 font-medium">
-                                  {company.selectedStudents.length} students selected
+                                  {company.totalSelections !== undefined 
+                                    ? `${company.totalSelections} students selected by company`
+                                    : `${(company.selectedStudents || []).length} students marked selected`}
                                 </p>
                               </div>
                             </div>
@@ -1027,11 +1136,12 @@ export default function CollegeConnect() {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
               <Building2 className="w-7 h-7 text-indigo-600" />
-              My College - {myCollege?.name}
+              My College - {myCollege?.name || 'Loading...'}
             </h2>
             <button
               onClick={() => setShowAddCompany(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+              disabled={!myCollege}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
               Add Company Visit
@@ -1043,6 +1153,8 @@ export default function CollegeConnect() {
               <h3 className="font-semibold text-gray-900 mb-3">Add Company Visit</h3>
               <div className="space-y-3">
                 <input
+                  id="company-name"
+                  name="companyName"
                   type="text"
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
@@ -1050,6 +1162,8 @@ export default function CollegeConnect() {
                   placeholder="Company name (e.g., Google, Microsoft)"
                 />
                 <input
+                  id="visit-date"
+                  name="visitDate"
                   type="date"
                   value={visitDate}
                   onChange={(e) => setVisitDate(e.target.value)}
@@ -1057,14 +1171,28 @@ export default function CollegeConnect() {
                   placeholder="Visit date (optional)"
                 />
                 <input
+                  id="job-roles"
+                  name="jobRoles"
                   type="text"
                   value={jobRoles}
                   onChange={(e) => setJobRoles(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                   placeholder="Job roles (comma-separated, e.g., SDE-1, SDE-2)"
                 />
-                <label className="flex items-center gap-2">
+                <input
+                  id="number-of-selections"
+                  name="numberOfSelections"
+                  type="number"
+                  value={numberOfSelections}
+                  onChange={(e) => setNumberOfSelections(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="Number of students selected (optional)"
+                  min="0"
+                />
+                <label htmlFor="selected-for-company" className="flex items-center gap-2">
                   <input
+                    id="selected-for-company"
+                    name="selectedForCompany"
                     type="checkbox"
                     checked={selectedForCompany}
                     onChange={(e) => setSelectedForCompany(e.target.checked)}
@@ -1086,6 +1214,7 @@ export default function CollegeConnect() {
                       setVisitDate('');
                       setJobRoles('');
                       setSelectedForCompany(false);
+                      setNumberOfSelections('');
                     }}
                     className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
                   >
@@ -1108,7 +1237,13 @@ export default function CollegeConnect() {
                     <div className="flex-1">
                       <h4 className="font-semibold text-gray-900">{company.name}</h4>
                       <div className="flex flex-wrap gap-4 text-sm text-gray-600 mt-1">
-                        <span>{company.selectedStudents.length} students selected</span>
+                        {company.totalSelections !== undefined ? (
+                          <span className="font-medium text-green-700">
+                            {company.totalSelections} students selected by company
+                          </span>
+                        ) : (
+                          <span>{(company.selectedStudents || []).length} students marked selected</span>
+                        )}
                         {company.visitDate && (
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
@@ -1130,13 +1265,13 @@ export default function CollegeConnect() {
                       <button
                         onClick={() => toggleSelection(company.name)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-                          company.selectedStudents.includes(currentUser.id)
+                          (company.selectedStudents || []).includes(currentUser.id)
                             ? 'bg-green-100 text-green-700'
                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                         }`}
                       >
                         <CheckCircle className="w-4 h-4" />
-                        {company.selectedStudents.includes(currentUser.id) ? 'Selected' : 'Mark as Selected'}
+                        {(company.selectedStudents || []).includes(currentUser.id) ? 'Selected' : 'Mark as Selected'}
                       </button>
                     )}
                   </div>
@@ -1160,7 +1295,7 @@ export default function CollegeConnect() {
                     <div className="flex-1">
                       <h4 className="font-semibold text-gray-900">{student.name}</h4>
                       <p className="text-sm text-gray-600">{student.email}</p>
-                      {student.selections.length > 0 && (
+                      {student.selections && student.selections.length > 0 && (
                         <div className="mt-2">
                           <p className="text-xs text-gray-500 mb-1">Selected by:</p>
                           <div className="flex flex-wrap gap-1">
@@ -1175,7 +1310,7 @@ export default function CollegeConnect() {
                     </div>
                     <div className="flex gap-2">
                       <a
-                        href={`https://${student.linkedin}`}
+                        href={student.linkedin.startsWith('http') ? student.linkedin : `https://${student.linkedin}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
