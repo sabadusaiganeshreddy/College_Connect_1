@@ -1099,10 +1099,10 @@ export default function CollegeConnect() {
           <div className="mb-6">
             <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
               <Briefcase className="w-5 h-5" />
-              Companies Visited ({myCollege?.companies.length || 0})
+              Companies Visited ({myCollege?.companies?.length || 0})
             </h3>
             <div className="grid gap-3">
-              {myCollege?.companies.map((company) => (
+              {myCollege?.companies?.map((company) => (
                 <div key={company.id} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
@@ -1151,10 +1151,10 @@ export default function CollegeConnect() {
           <div>
             <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
               <Users className="w-5 h-5" />
-              Students ({myCollege?.students.length || 0})
+              Students ({myCollege?.students?.length || 0})
             </h3>
             <div className="grid gap-3">
-              {myCollege?.students.map((student) => (
+              {myCollege?.students?.map((student) => (
                 <div key={student.id} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
