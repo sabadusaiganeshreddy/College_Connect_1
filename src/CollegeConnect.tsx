@@ -492,6 +492,28 @@ export default function CollegeConnect() {
   const myCollege = currentUser ? colleges[domainToKey(currentUser.collegeDomain)] : null;
   const searchResults = getSearchResults();
 
+  // Calculate total registered users across all colleges
+  const getTotalUsers = (): number => {
+    if (!colleges || typeof colleges !== 'object') return 0;
+    return Object.values(colleges).reduce((total, college) => {
+      return total + (college?.students?.length || 0);
+    }, 0);
+  };
+
+  // Calculate total colleges
+  const getTotalColleges = (): number => {
+    if (!colleges || typeof colleges !== 'object') return 0;
+    return Object.keys(colleges).length;
+  };
+
+  // Calculate total companies
+  const getTotalCompanies = (): number => {
+    if (!colleges || typeof colleges !== 'object') return 0;
+    return Object.values(colleges).reduce((total, college) => {
+      return total + (college?.companies?.length || 0);
+    }, 0);
+  };
+
   // Loading state
   if (isLoading) {
     return (
@@ -704,7 +726,7 @@ export default function CollegeConnect() {
               {student.selections && student.selections.length > 0 ? (
                 <div className="space-y-3">
                   {student.selections.map((selection, idx) => {
-                    const company = studentCollege.companies.find(c => c.name === selection.companyName);
+                    const company = (studentCollege?.companies || []).find(c => c.name === selection.companyName);
                     return (
                       <div key={idx} className="border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center justify-between">
@@ -856,6 +878,45 @@ export default function CollegeConnect() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Statistics Section */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-indigo-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 font-medium">Total Users</p>
+                <p className="text-3xl font-bold text-gray-900 mt-1">{getTotalUsers()}</p>
+              </div>
+              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                <Users className="w-5 h-5 text-indigo-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 font-medium">Total Colleges</p>
+                <p className="text-3xl font-bold text-gray-900 mt-1">{getTotalColleges()}</p>
+              </div>
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <Building2 className="w-5 h-5 text-green-600" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-purple-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600 font-medium">Total Companies</p>
+                <p className="text-3xl font-bold text-gray-900 mt-1">{getTotalCompanies()}</p>
+              </div>
+              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                <Briefcase className="w-5 h-5 text-purple-600" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Search Section */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
           <h2 className="text-xl font-bold text-gray-900 mb-4">Search Platform</h2>
@@ -910,8 +971,8 @@ export default function CollegeConnect() {
                           <div className="mb-3">
                             <p className="text-sm font-medium text-gray-700 mb-2">Companies Visited:</p>
                             <div className="space-y-3">
-                              {college.companies.map((company) => {
-                                const selectedStudents = college.students.filter(s => 
+                              {(college.companies || []).map((company) => {
+                                const selectedStudents = (college.students || []).filter(s => 
                                   (company.selectedStudents || []).includes(s.id)
                                 );
                                 return (
@@ -942,7 +1003,7 @@ export default function CollegeConnect() {
                                   </div>
                                 );
                               })}
-                              {college.companies.length === 0 && (
+                              {(college.companies || []).length === 0 && (
                                 <span className="text-sm text-gray-500">No companies added yet</span>
                               )}
                             </div>
@@ -951,11 +1012,11 @@ export default function CollegeConnect() {
                           <div className="flex items-center gap-4 text-sm text-gray-600">
                             <span className="flex items-center gap-1">
                               <Users className="w-4 h-4" />
-                              {college.students.length} students
+                              {(college.students || []).length} students
                             </span>
                             <span className="flex items-center gap-1">
                               <Building2 className="w-4 h-4" />
-                              {college.companies.length} companies
+                              {(college.companies || []).length} companies
                             </span>
                           </div>
                         </div>
@@ -972,8 +1033,8 @@ export default function CollegeConnect() {
                     <div key={idx} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
                       <h4 className="font-semibold text-gray-900 text-lg mb-3">{result.college.name}</h4>
                       <div className="space-y-2">
-                        {result.companies.map((company) => {
-                          const selectedStudents = result.college.students.filter(s => 
+                        {(result.companies || []).map((company) => {
+                          const selectedStudents = (result.college.students || []).filter(s => 
                             (company.selectedStudents || []).includes(s.id)
                           );
                           return (
