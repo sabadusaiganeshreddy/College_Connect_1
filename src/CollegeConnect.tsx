@@ -61,19 +61,6 @@ export default function CollegeConnect() {
   const [linkedin, setLinkedin] = useState('');
   const [newCollegeName, setNewCollegeName] = useState('');
   
-  // OTP verification
-  const [showOtpVerification, setShowOtpVerification] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
-  const [otpExpiry, setOtpExpiry] = useState<number | null>(null);
-  const [pendingRegistrationData, setPendingRegistrationData] = useState<{
-    email: string;
-    name: string;
-    linkedin: string;
-    domain: string;
-    domainKey: string;
-  } | null>(null);
-  
   // Add company form
   const [showAddCompany, setShowAddCompany] = useState(false);
   const [companyName, setCompanyName] = useState('');
@@ -89,17 +76,15 @@ export default function CollegeConnect() {
     let mounted = true;
     const collegesRef = ref(database, 'colleges');
     
-    // Set a timeout to prevent infinite loading (reduced to 3 seconds)
+    // Set a timeout to prevent infinite loading
     const timeout = setTimeout(() => {
       if (mounted && isLoading) {
-        console.warn('Firebase connection timeout - using empty data');
         setFirebaseError('Could not connect to Firebase. Using local data.');
-        // Initialize with empty data
         const emptyData: CollegesData = {};
         setColleges(emptyData);
         setIsLoading(false);
       }
-    }, 3000); // 3 second timeout
+    }, 3000);
     
     // Listen for changes in colleges data
     const unsubscribe = onValue(
@@ -126,13 +111,10 @@ export default function CollegeConnect() {
           
           if (needsMigration) {
             // Write migrated data back to Firebase
-            console.log('🔄 Migrating old data format to Firebase-safe keys...');
             set(collegesRef, migratedData).then(() => {
-              console.log('✅ Data migration complete!');
               setColleges(migratedData);
               setFirebaseError(null);
-            }).catch(err => {
-              console.error('Migration error:', err);
+            }).catch(() => {
               setColleges(migratedData);
               setFirebaseError('Data migrated locally, but Firebase write failed.');
             });
@@ -149,9 +131,7 @@ export default function CollegeConnect() {
       },
       (error) => {
         clearTimeout(timeout);
-        console.error('Firebase error:', error);
         setFirebaseError(`Firebase error: ${error.message}`);
-        // Initialize with empty data on error
         const emptyData: CollegesData = {};
         setColleges(emptyData);
         setIsLoading(false);
@@ -178,8 +158,8 @@ export default function CollegeConnect() {
   useEffect(() => {
     if (Object.keys(colleges).length > 0 && !isLoading && !firebaseError) {
       const collegesRef = ref(database, 'colleges');
-      set(collegesRef, colleges).catch(err => {
-        console.error('Firebase save error:', err);
+      set(collegesRef, colleges).catch(() => {
+        // Silent error handling
       });
     }
   }, [colleges, isLoading, firebaseError]);
@@ -208,33 +188,6 @@ export default function CollegeConnect() {
   // Convert domain to Firebase-safe key (dots not allowed in Firebase keys)
   const domainToKey = (domain: string): string => {
     return domain.replace(/\./g, '_');
-  };
-
-  // Generate 6-digit OTP
-  const generateOtp = (): string => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
-
-  // Send OTP (simulated - in production, use email service)
-  const sendOtp = (email: string, otp: string) => {
-    // In production, integrate with an email service like SendGrid, AWS SES, etc.
-    console.log(`OTP for ${email}: ${otp}`);
-    alert(`OTP sent to ${email}\n\nFor demo purposes, your OTP is: ${otp}\n\n(In production, this would be sent via email)`);
-  };
-
-  // Verify OTP
-  const verifyOtp = (enteredOtp: string): boolean => {
-    if (!otpExpiry || Date.now() > otpExpiry) {
-      alert('OTP has expired. Please request a new one.');
-      return false;
-    }
-    
-    if (enteredOtp === generatedOtp) {
-      return true;
-    }
-    
-    alert('Invalid OTP. Please try again.');
-    return false;
   };
 
   const handleRegister = () => {
@@ -273,48 +226,14 @@ export default function CollegeConnect() {
       }
     }
 
-    // Generate and send OTP
-    const newOtp = generateOtp();
-    setGeneratedOtp(newOtp);
-    setOtpExpiry(Date.now() + 5 * 60 * 1000); // OTP valid for 5 minutes
-    
-    // Store pending registration data
-    setPendingRegistrationData({
-      email,
-      name,
-      linkedin,
-      domain,
-      domainKey
-    });
-
-    // Send OTP
-    sendOtp(email, newOtp);
-    
-    // Show OTP verification screen
-    setShowOtpVerification(true);
-  };
-
-  const handleVerifyOtp = () => {
-    if (!verifyOtp(otp)) {
-      return;
-    }
-
-    if (!pendingRegistrationData) {
-      alert('Registration data not found. Please try again.');
-      return;
-    }
-
-    const { email, name, linkedin, domain, domainKey } = pendingRegistrationData;
-    const existingCollege = colleges[domainKey];
-    
+    // Check if college exists
     if (!existingCollege) {
       // College doesn't exist, go to add college view
-      setShowOtpVerification(false);
       setView('addCollege');
       return;
     }
 
-    // Add student to college
+    // Add student to college directly
     const newStudent: Student = {
       id: Date.now(),
       name,
@@ -335,26 +254,9 @@ export default function CollegeConnect() {
 
     setCurrentUser(newStudent);
     setView('dashboard');
-    setShowOtpVerification(false);
-    setOtp('');
-    setGeneratedOtp('');
-    setPendingRegistrationData(null);
     setEmail('');
     setName('');
     setLinkedin('');
-  };
-
-  const handleResendOtp = () => {
-    if (!pendingRegistrationData) {
-      alert('Registration data not found. Please start over.');
-      return;
-    }
-
-    const newOtp = generateOtp();
-    setGeneratedOtp(newOtp);
-    setOtpExpiry(Date.now() + 5 * 60 * 1000);
-    sendOtp(pendingRegistrationData.email, newOtp);
-    setOtp('');
   };
 
   const handleAddCollege = () => {
@@ -482,7 +384,6 @@ export default function CollegeConnect() {
     const myCollege = colleges[domainKey];
 
     if (!myCollege) {
-      console.error('College not found for domain:', currentUser.collegeDomain);
       alert('Error: Your college data could not be found. Please try logging in again.');
       return;
     }
@@ -573,13 +474,19 @@ export default function CollegeConnect() {
   };
 
   const getStudentById = (studentId: number): Student | null => {
-    for (const college of Object.values(colleges)) {
+    for (const domainKey of Object.keys(colleges)) {
+      const college = colleges[domainKey];
       if (college && college.students && Array.isArray(college.students)) {
         const student = college.students.find(s => s.id === studentId);
         if (student) return student;
       }
     }
     return null;
+  };
+
+  const getCollegeByDomain = (domain: string): College | null => {
+    const domainKey = domainToKey(domain);
+    return colleges[domainKey] || null;
   };
 
   const myCollege = currentUser ? colleges[domainToKey(currentUser.collegeDomain)] : null;
@@ -617,65 +524,6 @@ export default function CollegeConnect() {
 
   // Login view
   if (view === 'login') {
-    // Show OTP verification screen
-    if (showOtpVerification) {
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-            <div className="text-center mb-8">
-              <GraduationCap className="w-16 h-16 mx-auto text-indigo-600 mb-4" />
-              <h1 className="text-3xl font-bold text-gray-900">Verify OTP</h1>
-              <p className="text-gray-600 mt-2">Enter the OTP sent to {pendingRegistrationData?.email}</p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="otp-input" className="block text-sm font-medium text-gray-700 mb-2">Enter OTP</label>
-                <input
-                  id="otp-input"
-                  name="otp"
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  maxLength={6}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-center text-2xl tracking-widest"
-                  placeholder="000000"
-                />
-                <p className="text-xs text-gray-500 mt-1">OTP is valid for 5 minutes</p>
-              </div>
-
-              <button
-                onClick={handleVerifyOtp}
-                className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition"
-              >
-                Verify OTP
-              </button>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleResendOtp}
-                  className="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-200 transition"
-                >
-                  Resend OTP
-                </button>
-                <button
-                  onClick={() => {
-                    setShowOtpVerification(false);
-                    setOtp('');
-                    setGeneratedOtp('');
-                    setPendingRegistrationData(null);
-                  }}
-                  className="flex-1 bg-red-50 text-red-600 py-2 rounded-lg font-medium hover:bg-red-100 transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     // Show registration form
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -794,11 +642,22 @@ export default function CollegeConnect() {
   // Student Profile view
   if (view === 'studentProfile' && selectedStudentId) {
     const student = getStudentById(selectedStudentId);
-    const studentCollege = student ? colleges[student.collegeDomain] : null;
+    const studentCollege = student ? getCollegeByDomain(student.collegeDomain) : null;
 
     if (!student || !studentCollege) {
-      setView('dashboard');
-      return null;
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-600 mb-4">Student not found</p>
+            <button
+              onClick={() => setView('dashboard')}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      );
     }
 
     return (
@@ -887,7 +746,6 @@ export default function CollegeConnect() {
 
   // My Profile view
   if (view === 'profile' && currentUser) {
-    console.log('Rendering profile view for:', currentUser.name);
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-4xl mx-auto px-4 py-8">
@@ -976,10 +834,7 @@ export default function CollegeConnect() {
             <div className="flex items-center gap-4">
               <button
                 type="button"
-                onClick={() => {
-                  console.log('Profile button clicked');
-                  setView('profile');
-                }}
+                onClick={() => setView('profile')}
                 className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition cursor-pointer"
               >
                 <User className="w-5 h-5" />
@@ -1054,12 +909,39 @@ export default function CollegeConnect() {
                           
                           <div className="mb-3">
                             <p className="text-sm font-medium text-gray-700 mb-2">Companies Visited:</p>
-                            <div className="flex flex-wrap gap-2">
-                              {college.companies.map((company) => (
-                                <span key={company.id} className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">
-                                  {company.name} ({company.totalSelections !== undefined ? company.totalSelections : (company.selectedStudents || []).length} selected)
-                                </span>
-                              ))}
+                            <div className="space-y-3">
+                              {college.companies.map((company) => {
+                                const selectedStudents = college.students.filter(s => 
+                                  (company.selectedStudents || []).includes(s.id)
+                                );
+                                return (
+                                  <div key={company.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="font-semibold text-gray-900">{company.name}</span>
+                                      <span className="text-sm text-gray-600">
+                                        {company.totalSelections !== undefined ? company.totalSelections : selectedStudents.length} selected
+                                      </span>
+                                    </div>
+                                    {selectedStudents.length > 0 && (
+                                      <div className="mt-2">
+                                        <p className="text-xs text-gray-600 mb-2">Selected Students:</p>
+                                        <div className="flex flex-wrap gap-2">
+                                          {selectedStudents.map((student) => (
+                                            <button
+                                              key={student.id}
+                                              onClick={() => viewStudentProfile(student.id)}
+                                              className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs hover:bg-green-200 transition cursor-pointer flex items-center gap-1"
+                                            >
+                                              <User className="w-3 h-3" />
+                                              {student.name}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                               {college.companies.length === 0 && (
                                 <span className="text-sm text-gray-500">No companies added yet</span>
                               )}
@@ -1090,35 +972,58 @@ export default function CollegeConnect() {
                     <div key={idx} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
                       <h4 className="font-semibold text-gray-900 text-lg mb-3">{result.college.name}</h4>
                       <div className="space-y-2">
-                        {result.companies.map((company) => (
-                          <div key={company.id} className="bg-green-50 border border-green-200 rounded-lg p-3">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <h5 className="font-medium text-green-900">{company.name}</h5>
-                                {company.visitDate && (
-                                  <p className="text-sm text-green-700 flex items-center gap-1 mt-1">
-                                    <Calendar className="w-3 h-3" />
-                                    Visit: {new Date(company.visitDate).toLocaleDateString()}
+                        {result.companies.map((company) => {
+                          const selectedStudents = result.college.students.filter(s => 
+                            (company.selectedStudents || []).includes(s.id)
+                          );
+                          return (
+                            <div key={company.id} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <h5 className="font-medium text-green-900">{company.name}</h5>
+                                  {company.visitDate && (
+                                    <p className="text-sm text-green-700 flex items-center gap-1 mt-1">
+                                      <Calendar className="w-3 h-3" />
+                                      Visit: {new Date(company.visitDate).toLocaleDateString()}
+                                    </p>
+                                  )}
+                                  {company.jobRoles && company.jobRoles.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-2">
+                                      {company.jobRoles.map((role, i) => (
+                                        <span key={i} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">
+                                          {role}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <p className="text-sm text-green-700 mt-2 font-medium">
+                                    {company.totalSelections !== undefined 
+                                      ? `${company.totalSelections} students selected by company`
+                                      : `${selectedStudents.length} students marked selected`}
                                   </p>
-                                )}
-                                {company.jobRoles && company.jobRoles.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mt-2">
-                                    {company.jobRoles.map((role, i) => (
-                                      <span key={i} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">
-                                        {role}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
-                                <p className="text-sm text-green-700 mt-2 font-medium">
-                                  {company.totalSelections !== undefined 
-                                    ? `${company.totalSelections} students selected by company`
-                                    : `${(company.selectedStudents || []).length} students marked selected`}
-                                </p>
+                                  {selectedStudents.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-green-300">
+                                      <p className="text-xs text-green-800 font-semibold mb-2">Selected Students:</p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {selectedStudents.map((student) => (
+                                          <button
+                                            key={student.id}
+                                            onClick={() => viewStudentProfile(student.id)}
+                                            className="px-3 py-1.5 bg-white border border-green-300 text-green-800 rounded-lg text-xs hover:bg-green-100 transition cursor-pointer flex items-center gap-1.5"
+                                          >
+                                            <User className="w-3 h-3" />
+                                            <span className="font-medium">{student.name}</span>
+                                            <ExternalLink className="w-3 h-3" />
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
