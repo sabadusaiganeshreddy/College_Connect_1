@@ -156,13 +156,13 @@ export default function CollegeConnect() {
 
   // Save colleges to Firebase whenever data changes
   useEffect(() => {
-    if (Object.keys(colleges).length > 0 && !isLoading && !firebaseError) {
+    if (Object.keys(colleges).length > 0 && !isLoading) {
       const collegesRef = ref(database, 'colleges');
-      set(collegesRef, colleges).catch(() => {
-        // Silent error handling
+      set(collegesRef, colleges).catch((error) => {
+        console.error('Failed to save to Firebase:', error);
       });
     }
-  }, [colleges, isLoading, firebaseError]);
+  }, [colleges, isLoading]);
 
   // Save current user to localStorage for session management
   useEffect(() => {
@@ -190,7 +190,7 @@ export default function CollegeConnect() {
     return domain.replace(/\./g, '_');
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!email || !name || !linkedin) {
       alert('Please fill all fields');
       return;
@@ -244,22 +244,40 @@ export default function CollegeConnect() {
       registeredAt: new Date().toISOString()
     };
 
-    setColleges({
+    const updatedColleges = {
       ...colleges,
       [domainKey]: {
         ...existingCollege,
         students: [...existingCollege.students, newStudent]
       }
-    });
+    };
 
-    setCurrentUser(newStudent);
-    setView('dashboard');
-    setEmail('');
-    setName('');
-    setLinkedin('');
+    // Save to Firebase first, then update state
+    try {
+      const collegesRef = ref(database, 'colleges');
+      await set(collegesRef, updatedColleges);
+      
+      // Only update state and proceed after successful Firebase save
+      setColleges(updatedColleges);
+      setCurrentUser(newStudent);
+      setView('dashboard');
+      setEmail('');
+      setName('');
+      setLinkedin('');
+    } catch (error) {
+      console.error('Firebase save error:', error);
+      // Still allow local registration
+      setColleges(updatedColleges);
+      setCurrentUser(newStudent);
+      setView('dashboard');
+      setEmail('');
+      setName('');
+      setLinkedin('');
+      alert('Registered locally. Please check your internet connection.');
+    }
   };
 
-  const handleAddCollege = () => {
+  const handleAddCollege = async () => {
     if (!newCollegeName) {
       alert('Please enter college name');
       return;
@@ -283,7 +301,7 @@ export default function CollegeConnect() {
       registeredAt: new Date().toISOString()
     };
 
-    setColleges({
+    const updatedColleges = {
       ...colleges,
       [domainKey]: {
         name: newCollegeName,
@@ -292,14 +310,32 @@ export default function CollegeConnect() {
         companies: [],
         createdAt: new Date().toISOString()
       }
-    });
+    };
 
-    setCurrentUser(newStudent);
-    setView('dashboard');
-    setNewCollegeName('');
-    setEmail('');
-    setName('');
-    setLinkedin('');
+    // Save to Firebase first
+    try {
+      const collegesRef = ref(database, 'colleges');
+      await set(collegesRef, updatedColleges);
+      
+      setColleges(updatedColleges);
+      setCurrentUser(newStudent);
+      setView('dashboard');
+      setNewCollegeName('');
+      setEmail('');
+      setName('');
+      setLinkedin('');
+    } catch (error) {
+      console.error('Firebase save error:', error);
+      // Still allow local registration
+      setColleges(updatedColleges);
+      setCurrentUser(newStudent);
+      setView('dashboard');
+      setNewCollegeName('');
+      setEmail('');
+      setName('');
+      setLinkedin('');
+      alert('College created locally. Please check your internet connection.');
+    }
   };
 
   const handleAddCompany = () => {
