@@ -16,6 +16,7 @@
     "sync:sheets:auto": "node auto-sync-sheets.mjs"
   },
   "dependencies": {
+    "dotenv": "^17.2.3",
     "firebase": "^12.4.0",
     "googleapis": "^164.1.0",
     "lucide-react": "^0.294.0",
