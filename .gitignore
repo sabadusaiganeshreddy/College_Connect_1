@@ -12,12 +12,14 @@ dist
 dist-ssr
 *.local
 
-# Firebase configuration
-src/firebase.ts
+# Environment variables (NEVER COMMIT!)
+.env
+.env.local
+.env.production
+.env.development
 
 # Google Sheets credentials (NEVER COMMIT!)
 google-credentials.json
-.env
 
 # Backups (keep backups local, don't commit to git)
 backups/
