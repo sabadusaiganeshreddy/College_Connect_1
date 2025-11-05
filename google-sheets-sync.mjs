@@ -3,17 +3,8 @@ import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, get } from 'firebase/database';
 import { readFileSync } from 'fs';
 
-// Firebase config
-const firebaseConfig = {
-  apiKey: "AIzaSyAFdErCnl3kvOqoC6K1a_8qB59TrCm5Noo",
-  authDomain: "collegeconnect-a3fe0.firebaseapp.com",
-  databaseURL: "https://collegeconnect-a3fe0-default-rtdb.firebaseio.com",
-  projectId: "collegeconnect-a3fe0",
-  storageBucket: "collegeconnect-a3fe0.firebasestorage.app",
-  messagingSenderId: "690338635653",
-  appId: "1:690338635653:web:8e6071f24e8f36e89cf653",
-  measurementId: "G-ZCRL2F6K4D"
-};
+// Load Firebase config from file (NOT from code!)
+const firebaseConfig = JSON.parse(readFileSync('./src/firebase.ts', 'utf8').match(/const firebaseConfig = ({[\s\S]*?});/)[1]);
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
