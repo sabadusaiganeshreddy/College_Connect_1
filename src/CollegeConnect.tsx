@@ -70,6 +70,48 @@ export default function CollegeConnect() {
   const [numberOfSelections, setNumberOfSelections] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
+  const [lastBackupSnapshot, setLastBackupSnapshot] = useState<CollegesData | null>(null);
+
+  // Check for emergency backups and offer recovery
+  useEffect(() => {
+    const checkEmergencyBackup = () => {
+      try {
+        const emergencyBackup = localStorage.getItem('emergencyBackup');
+        const lastKnownGood = localStorage.getItem('lastKnownGoodData');
+        
+        if (emergencyBackup) {
+          const backup = JSON.parse(emergencyBackup);
+          const backupAge = Date.now() - new Date(backup.timestamp).getTime();
+          const hoursOld = Math.floor(backupAge / (1000 * 60 * 60));
+          
+          if (hoursOld < 24 && confirm(`🔄 Found emergency backup from ${hoursOld} hours ago (${backup.reason}).\n\nWould you like to restore it?`)) {
+            return backup.data;
+          }
+        }
+        
+        if (lastKnownGood) {
+          const backup = JSON.parse(lastKnownGood);
+          const backupAge = Date.now() - new Date(backup.timestamp).getTime();
+          const hoursOld = Math.floor(backupAge / (1000 * 60 * 60));
+          
+          // Auto-restore if less than 1 hour old and Firebase is empty
+          if (hoursOld < 1) {
+            return backup.data;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to check emergency backups:', e);
+      }
+      return null;
+    };
+
+    const localBackup = checkEmergencyBackup();
+    if (localBackup) {
+      setColleges(localBackup);
+      setLastBackupSnapshot(localBackup);
+      alert('✅ Restored from local backup!');
+    }
+  }, []);
 
   // Load data from Firebase on mount
   useEffect(() => {
@@ -80,8 +122,22 @@ export default function CollegeConnect() {
     const timeout = setTimeout(() => {
       if (mounted && isLoading) {
         setFirebaseError('Could not connect to Firebase. Using local data.');
-        const emptyData: CollegesData = {};
-        setColleges(emptyData);
+        // Try to load from localStorage backup
+        try {
+          const lastKnownGood = localStorage.getItem('lastKnownGoodData');
+          if (lastKnownGood) {
+            const backup = JSON.parse(lastKnownGood);
+            setColleges(backup.data);
+            setLastBackupSnapshot(backup.data);
+            alert('⚠️ Firebase unavailable. Loaded from local backup.');
+          } else {
+            const emptyData: CollegesData = {};
+            setColleges(emptyData);
+          }
+        } catch (e) {
+          const emptyData: CollegesData = {};
+          setColleges(emptyData);
+        }
         setIsLoading(false);
       }
     }, 3000);
@@ -122,6 +178,8 @@ export default function CollegeConnect() {
             setColleges(migratedData);
             setFirebaseError(null);
           }
+          // Create initial backup snapshot
+          setLastBackupSnapshot(migratedData);
         } else {
           // Initialize with empty data if no data exists
           const emptyData: CollegesData = {};
@@ -154,15 +212,75 @@ export default function CollegeConnect() {
     };
   }, []);
 
-  // Save colleges to Firebase whenever data changes
+  // Save colleges to Firebase with enhanced protection
   useEffect(() => {
     if (Object.keys(colleges).length > 0 && !isLoading) {
-      const collegesRef = ref(database, 'colleges');
-      set(collegesRef, colleges).catch((error) => {
-        console.error('Failed to save to Firebase:', error);
-      });
+      const saveData = async () => {
+        const totalStudents = Object.values(colleges).reduce((sum, c) => sum + (c?.students?.length || 0), 0);
+        const totalColleges = Object.keys(colleges).length;
+        
+        // CRITICAL PROTECTION: Prevent catastrophic data loss
+        if (lastBackupSnapshot) {
+          const lastTotalStudents = Object.values(lastBackupSnapshot).reduce((sum, c) => sum + (c?.students?.length || 0), 0);
+          const lastTotalColleges = Object.keys(lastBackupSnapshot).length;
+          
+          // If we're about to lose more than 50% of data, BLOCK the save
+          const studentLossPercent = lastTotalStudents > 0 ? ((lastTotalStudents - totalStudents) / lastTotalStudents) * 100 : 0;
+          const collegeLossPercent = lastTotalColleges > 0 ? ((lastTotalColleges - totalColleges) / lastTotalColleges) * 100 : 0;
+          
+          if (studentLossPercent > 50 || collegeLossPercent > 50) {
+            console.error('🚨 CRITICAL: Prevented catastrophic data loss!');
+            console.error(`Would have lost ${studentLossPercent.toFixed(1)}% of students and ${collegeLossPercent.toFixed(1)}% of colleges`);
+            alert(`🚨 CRITICAL ERROR: Prevented saving data that would lose ${Math.max(studentLossPercent, collegeLossPercent).toFixed(0)}% of your database!\n\nThis is likely a bug. Please refresh the page and contact support.`);
+            
+            // Restore from last known good state
+            setColleges(lastBackupSnapshot);
+            return;
+          }
+          
+          // If data decreased significantly (20-50%), create backup and warn
+          if (studentLossPercent > 20 || collegeLossPercent > 20) {
+            console.warn(`⚠️ WARNING: Data decreased by ${Math.max(studentLossPercent, collegeLossPercent).toFixed(1)}%`);
+            // Create emergency backup in localStorage
+            try {
+              localStorage.setItem('emergencyBackup', JSON.stringify({
+                timestamp: new Date().toISOString(),
+                data: lastBackupSnapshot,
+                reason: 'Significant data decrease detected'
+              }));
+            } catch (e) {
+              console.error('Failed to create emergency backup:', e);
+            }
+          }
+        }
+        
+        // Save to Firebase
+        try {
+          const collegesRef = ref(database, 'colleges');
+          await set(collegesRef, colleges);
+          
+          // Update backup snapshot after successful save
+          setLastBackupSnapshot(colleges);
+          
+          // Also save to localStorage as backup
+          try {
+            localStorage.setItem('lastKnownGoodData', JSON.stringify({
+              timestamp: new Date().toISOString(),
+              data: colleges
+            }));
+          } catch (e) {
+            console.error('LocalStorage backup failed:', e);
+          }
+          
+        } catch (error) {
+          console.error('Failed to save to Firebase:', error);
+          alert('⚠️ Warning: Failed to sync data to Firebase. Your changes may not be saved.');
+        }
+      };
+      
+      saveData();
     }
-  }, [colleges, isLoading]);
+  }, [colleges, isLoading, lastBackupSnapshot]);
 
   // Save current user to localStorage for session management
   useEffect(() => {

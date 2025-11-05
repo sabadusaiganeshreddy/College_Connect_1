@@ -6,10 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "backup": "node auto-backup.mjs",
+    "backup:now": "node backup-firebase.mjs",
+    "restore": "node restore-backup.mjs",
+    "check:db": "node check-firebase.mjs",
+    "setup:sheets": "node setup-google-sheet.mjs",
+    "sync:sheets": "node google-sheets-sync.mjs",
+    "sync:sheets:auto": "node auto-sync-sheets.mjs"
   },
   "dependencies": {
     "firebase": "^12.4.0",
+    "googleapis": "^164.1.0",
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

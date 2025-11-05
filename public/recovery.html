@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Recovery - College Connect</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        .alert {
+            background: #FEF3C7;
+            border-left: 4px solid #F59E0B;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .alert h3 { color: #92400E; margin-bottom: 10px; }
+        .alert p { color: #92400E; line-height: 1.6; }
+        button {
+            background: #667eea;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin: 10px 5px;
+            transition: all 0.3s;
+        }
+        button:hover { background: #5568d3; transform: translateY(-2px); }
+        button:disabled { background: #9CA3AF; cursor: not-allowed; }
+        #output {
+            background: #f9f9f9;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { color: #059669; font-weight: 600; }
+        .error { color: #DC2626; font-weight: 600; }
+        pre {
+            background: #1f2937;
+            color: #f3f4f6;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .step {
+            background: #EFF6FF;
+            border-left: 4px solid #3B82F6;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🆘 Emergency Data Recovery</h1>
+        <p style="color: #6B7280; margin-bottom: 20px;">College Connect - Restore Lost Data</p>
+        
+        <div class="alert">
+            <h3>⚠️ Data Loss Detected</h3>
+            <p>We experienced data loss. If you were registered before, your data might still be in your browser's cache. Please help us recover by submitting your cached data.</p>
+        </div>
+
+        <div class="step">
+            <h3>📱 Step 1: Check Your Local Data</h3>
+            <p>Click below to check if you have any saved data in your browser:</p>
+            <button onclick="checkLocalData()">🔍 Check My Browser Data</button>
+        </div>
+
+        <div class="step">
+            <h3>☁️ Step 2: Submit Your Data (If Found)</h3>
+            <p>If data is found, submit it to help restore the database:</p>
+            <button onclick="submitRecovery()" id="submitBtn" disabled>📤 Submit Recovery Data</button>
+        </div>
+
+        <div class="step">
+            <h3>📧 Step 3: Re-register (If No Data Found)</h3>
+            <p>If no cached data is found, please re-register:</p>
+            <button onclick="goToMainApp()">🔄 Go to Main App</button>
+        </div>
+
+        <div id="output"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, get, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDewKmEsvryFalR53CMLGrTiem3l6-fCXc",
+            authDomain: "collegeconnect-a3fe0.firebaseapp.com",
+            databaseURL: "https://collegeconnect-a3fe0-default-rtdb.firebaseio.com",
+            projectId: "collegeconnect-a3fe0",
+            storageBucket: "collegeconnect-a3fe0.firebasestorage.app",
+            messagingSenderId: "90391097177",
+            appId: "1:90391097177:web:4d037f831fa4401632e648"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
+
+        let cachedUserData = null;
+
+        window.checkLocalData = function() {
+            const output = document.getElementById('output');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            output.innerHTML = '<h3>🔍 Checking browser storage...</h3>';
+            
+            try {
+                const savedUser = localStorage.getItem('collegeConnectUser');
+                
+                if (savedUser) {
+                    cachedUserData = JSON.parse(savedUser);
+                    output.innerHTML += '<p class="success">✅ FOUND YOUR DATA!</p>';
+                    output.innerHTML += '<pre>' + JSON.stringify(cachedUserData, null, 2) + '</pre>';
+                    output.innerHTML += '<p style="margin-top: 15px;"><strong>Your information is safe! Click "Submit Recovery Data" to help restore the database.</strong></p>';
+                    submitBtn.disabled = false;
+                    submitBtn.style.background = '#059669';
+                } else {
+                    output.innerHTML += '<p class="error">❌ No cached data found in your browser.</p>';
+                    output.innerHTML += '<p style="margin-top: 15px;">This means either:</p>';
+                    output.innerHTML += '<ul style="margin-left: 20px; line-height: 1.8;">';
+                    output.innerHTML += '<li>You cleared your browser data recently</li>';
+                    output.innerHTML += '<li>You registered from a different device/browser</li>';
+                    output.innerHTML += '<li>You never registered</li>';
+                    output.innerHTML += '</ul>';
+                    output.innerHTML += '<p style="margin-top: 15px;"><strong>Please re-register using the main app.</strong></p>';
+                }
+            } catch (error) {
+                output.innerHTML += `<p class="error">Error: ${error.message}</p>`;
+            }
+        };
+
+        window.submitRecovery = async function() {
+            if (!cachedUserData) {
+                alert('No data to submit!');
+                return;
+            }
+
+            const output = document.getElementById('output');
+            const submitBtn = document.getElementById('submitBtn');
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Submitting...';
+            
+            try {
+                output.innerHTML += '<h3 style="margin-top: 20px;">📤 Submitting your data...</h3>';
+                
+                const domain = cachedUserData.collegeDomain;
+                const domainKey = domain.replace(/\./g, '_');
+                
+                // Get current database
+                const snapshot = await get(ref(database, 'colleges'));
+                const colleges = snapshot.val() || {};
+                
+                // Add or update college with user data
+                if (!colleges[domainKey]) {
+                    colleges[domainKey] = {
+                        domain: domain,
+                        students: [cachedUserData],
+                        companies: [],
+                        createdAt: cachedUserData.registeredAt
+                    };
+                    output.innerHTML += '<p class="success">✅ Created new college entry</p>';
+                } else {
+                    // Check if student already exists
+                    const existingStudent = colleges[domainKey].students?.find(s => s.email === cachedUserData.email);
+                    if (!existingStudent) {
+                        if (!colleges[domainKey].students) colleges[domainKey].students = [];
+                        colleges[domainKey].students.push(cachedUserData);
+                        output.innerHTML += '<p class="success">✅ Added your data to existing college</p>';
+                    } else {
+                        output.innerHTML += '<p style="color: #F59E0B;">⚠️ Your data already exists in database</p>';
+                    }
+                }
+                
+                // Save to Firebase
+                await set(ref(database, 'colleges'), colleges);
+                
+                output.innerHTML += '<p class="success" style="font-size: 18px; margin-top: 20px;">🎉 SUCCESS! Your data has been restored to the database.</p>';
+                output.innerHTML += '<p style="margin-top: 10px;">Thank you for helping recover the data!</p>';
+                
+                submitBtn.textContent = '✅ Submitted Successfully!';
+                submitBtn.style.background = '#059669';
+                
+                setTimeout(() => {
+                    window.location.href = 'https://college-connect-delta.vercel.app/';
+                }, 3000);
+                
+            } catch (error) {
+                output.innerHTML += `<p class="error">❌ Submission failed: ${error.message}</p>`;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '📤 Submit Recovery Data';
+                submitBtn.style.background = '#667eea';
+            }
+        };
+
+        window.goToMainApp = function() {
+            window.location.href = 'https://college-connect-delta.vercel.app/';
+        };
+
+        // Auto-check on load
+        window.onload = () => checkLocalData();
+    </script>
+</body>
+</html>

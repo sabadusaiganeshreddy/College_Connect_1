@@ -15,6 +15,14 @@ dist-ssr
 # Firebase configuration
 src/firebase.ts
 
+# Google Sheets credentials (NEVER COMMIT!)
+google-credentials.json
+.env
+
+# Backups (keep backups local, don't commit to git)
+backups/
+*.json.backup
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
