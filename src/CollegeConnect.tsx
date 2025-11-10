@@ -291,7 +291,7 @@ export default function CollegeConnect() {
 
   const extractDomain = (email: string): string | null => {
     const match = email.match(/@(.+)$/);
-    return match ? match[1] : null;
+    return match ? match[1].toLowerCase() : null;
   };
 
   const validateEmail = (email: string): boolean => {
@@ -300,12 +300,86 @@ export default function CollegeConnect() {
   };
 
   const validateLinkedIn = (url: string): boolean => {
-    return url.includes('linkedin.com/in/') || url.startsWith('linkedin.com/in/');
+    // Must include linkedin.com/in/ and should ideally start with http:// or https://
+    if (!url.includes('linkedin.com/in/')) {
+      return false;
+    }
+    // Check if it's a proper URL format
+    const hasProtocol = url.startsWith('http://') || url.startsWith('https://');
+    const hasJustDomain = url.startsWith('linkedin.com/in/') || url.startsWith('www.linkedin.com/in/');
+    return hasProtocol || hasJustDomain;
   };
 
   // Convert domain to Firebase-safe key (dots not allowed in Firebase keys)
   const domainToKey = (domain: string): string => {
     return domain.replace(/\./g, '_');
+  };
+
+  // Block personal email domains
+  const isPersonalEmailDomain = (domain: string): boolean => {
+    const personalDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'yahoo.co.in', 'rediffmail.com'];
+    return personalDomains.includes(domain.toLowerCase());
+  };
+
+  // Find similar college domains to prevent duplicates
+  const findSimilarDomains = (newDomain: string): string[] => {
+    const similar: string[] = [];
+    const domainParts = newDomain.split('.');
+    
+    // Check all existing colleges
+    Object.values(colleges).forEach(college => {
+      const existingDomain = college.domain;
+      
+      // Skip if it's the same domain
+      if (existingDomain === newDomain) return;
+      
+      // Check if domains are similar (e.g., gnits.ac vs gnits.ac.in)
+      const existingParts = existingDomain.split('.');
+      
+      // If first part matches (institution name), consider it similar
+      if (domainParts[0] === existingParts[0]) {
+        similar.push(existingDomain);
+      }
+      
+      // Check for Levenshtein distance < 3 (very similar strings)
+      const distance = getLevenshteinDistance(newDomain, existingDomain);
+      if (distance > 0 && distance <= 3) {
+        if (!similar.includes(existingDomain)) {
+          similar.push(existingDomain);
+        }
+      }
+    });
+    
+    return similar;
+  };
+
+  // Calculate Levenshtein distance between two strings
+  const getLevenshteinDistance = (str1: string, str2: string): number => {
+    const matrix: number[][] = [];
+    
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
   };
 
   const handleRegister = async () => {
@@ -320,7 +394,7 @@ export default function CollegeConnect() {
     }
 
     if (!validateLinkedIn(linkedin)) {
-      alert('Please enter a valid LinkedIn profile URL (e.g., linkedin.com/in/yourprofile)');
+      alert('Please enter a valid LinkedIn profile URL\n\nAccepted formats:\n• https://linkedin.com/in/yourprofile\n• linkedin.com/in/yourprofile\n• www.linkedin.com/in/yourprofile');
       return;
     }
 
@@ -330,12 +404,18 @@ export default function CollegeConnect() {
       return;
     }
 
+    // Block personal email domains
+    if (isPersonalEmailDomain(domain)) {
+      alert('⚠️ Personal email not allowed!\n\nPlease use your college/university email address (e.g., student@college.edu).\n\nPersonal emails like Gmail, Yahoo, Hotmail are not permitted.');
+      return;
+    }
+
     const domainKey = domainToKey(domain);
 
     // Check if user already registered
     const existingCollege = colleges[domainKey];
     if (existingCollege) {
-      const existingStudent = existingCollege.students.find(s => s.email === email);
+      const existingStudent = existingCollege.students.find(s => s.email.toLowerCase() === email.toLowerCase());
       if (existingStudent) {
         alert('This email is already registered!');
         setCurrentUser(existingStudent);
@@ -346,6 +426,25 @@ export default function CollegeConnect() {
 
     // Check if college exists
     if (!existingCollege) {
+      // Check for similar domains before creating new college
+      const similarDomains = findSimilarDomains(domain);
+      
+      if (similarDomains.length > 0) {
+        const similarColleges = similarDomains.map(d => {
+          const key = domainToKey(d);
+          return `• ${colleges[key].name} (${d})`;
+        }).join('\n');
+        
+        const userChoice = confirm(
+          `⚠️ Similar college(s) found!\n\n${similarColleges}\n\nYour email domain: ${domain}\n\nDo you want to create a NEW college?\n\n• Click OK to create a new college\n• Click Cancel to review (you may want to use the correct domain)`
+        );
+        
+        if (!userChoice) {
+          alert('Registration cancelled. Please verify your email domain with your college administration.');
+          return;
+        }
+      }
+      
       // College doesn't exist, go to add college view
       setView('addCollege');
       return;
@@ -355,7 +454,7 @@ export default function CollegeConnect() {
     const newStudent: Student = {
       id: Date.now(),
       name,
-      email,
+      email: email.toLowerCase(),
       linkedin,
       collegeDomain: domain,
       selections: [],
@@ -407,12 +506,30 @@ export default function CollegeConnect() {
       return;
     }
 
+    // Double-check personal email domains
+    if (isPersonalEmailDomain(domain)) {
+      alert('⚠️ Cannot create college with personal email domain!\n\nPlease use your official college/university email address.');
+      setView('login');
+      return;
+    }
+
+    // Final check for similar domains
+    const similarDomains = findSimilarDomains(domain);
+    if (similarDomains.length > 0) {
+      const similarColleges = similarDomains.map(d => {
+        const key = domainToKey(d);
+        return `• ${colleges[key].name} (${d})`;
+      }).join('\n');
+      
+      alert(`⚠️ WARNING: Similar colleges exist!\n\n${similarColleges}\n\nYou are creating: ${newCollegeName} (${domain})\n\nIf this is a duplicate, it may cause data split issues.`);
+    }
+
     const domainKey = domainToKey(domain); // Convert to Firebase-safe key
 
     const newStudent: Student = {
       id: Date.now(),
       name,
-      email,
+      email: email.toLowerCase(),
       linkedin,
       collegeDomain: domain,
       selections: [],
