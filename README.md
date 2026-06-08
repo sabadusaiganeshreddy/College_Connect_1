@@ -156,10 +156,3 @@ college-connect-app/
 - ✅ Emergency backups (localStorage + Google Sheets)
 - ✅ Real-time monitoring (detects attacks instantly)
 
-## 📝 License
-
-MIT
-
-## 👨‍💻 Author
-
-Sai Sagar Ganteda
