@@ -1,0 +1,56 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - redis
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      CLIENT_ORIGIN: http://localhost:5173
+      MONGODB_URI: mongodb://mongo:27017/college_connect
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-in-production
+    ports:
+      - "4000:4000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - redis
+    command: ["npm", "run", "start:worker"]
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/college_connect
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-me-in-production
+      WORKER_CONCURRENCY: 8
+
+volumes:
+  mongo-data:
+  redis-data:
+

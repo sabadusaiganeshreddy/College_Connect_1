@@ -1,893 +1,401 @@
-import { useState, useEffect } from 'react';
-import { Search, Building2, GraduationCap, Users, Plus, CheckCircle, ExternalLink, Calendar, Briefcase, LogOut, User, Award, ArrowLeft, Loader2, Linkedin } from 'lucide-react';
-import { database } from './firebase';
-import { ref, set, onValue } from 'firebase/database';
-
-// Type definitions
-interface Student {
-  id: number;
-  name: string;
-  email: string;
-  linkedin: string;
-  collegeDomain: string;
-  selections: CompanySelection[];
-  registeredAt: string;
-}
-
-interface CompanySelection {
-  companyName: string;
-  selectedAt: string;
-}
-
-interface CompanyVisit {
-  id: number;
-  name: string;
-  visitDate?: string;
-  jobRoles?: string[];
-  addedBy: number;
-  selectedStudents: number[];
-  totalSelections?: number; // Total number of students selected by company
-  addedAt: string;
-}
-
-interface College {
-  name: string;
-  domain: string;
-  students: Student[];
-  companies: CompanyVisit[];
-  createdAt: string;
-}
-
-interface CollegesData {
-  [domain: string]: College;
-}
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  Award,
+  Briefcase,
+  Building2,
+  Calendar,
+  CheckCircle,
+  ExternalLink,
+  GraduationCap,
+  Loader2,
+  LogOut,
+  Plus,
+  Search,
+  User,
+  Users,
+} from 'lucide-react';
+import {
+  addCompanyVisit,
+  ApiError,
+  College,
+  CollegesData,
+  CompanyVisit,
+  fetchPlacementSnapshot,
+  registerStudent,
+  SimilarCollege,
+  Student,
+  subscribeToPlacementEvents,
+  toggleCompanySelection,
+} from './services/api';
 
 interface CompanySearchResult {
   college: College;
   companies: CompanyVisit[];
 }
 
+type View = 'login' | 'dashboard' | 'addCollege' | 'profile' | 'studentProfile';
+
+const emptyColleges: CollegesData = {};
+
+function domainToKey(domain: string): string {
+  return domain.replace(/\./g, '_').toLowerCase();
+}
+
+function extractDomain(email: string): string | null {
+  const match = email.trim().toLowerCase().match(/@(.+)$/);
+  return match ? match[1] : null;
+}
+
+function validateLinkedIn(url: string): boolean {
+  return url.includes('linkedin.com/in/');
+}
+
+function getStoredUser(): Student | null {
+  try {
+    const raw = localStorage.getItem('collegeConnectUser');
+    return raw ? JSON.parse(raw) as Student : null;
+  } catch {
+    return null;
+  }
+}
+
+function findStudentInSnapshot(colleges: CollegesData, studentId: string): Student | null {
+  for (const college of Object.values(colleges)) {
+    const student = college.students.find((candidate) => candidate.id === studentId);
+    if (student) {
+      return student;
+    }
+  }
+  return null;
+}
+
+function getApiDetails(error: unknown): Record<string, unknown> {
+  if (error instanceof ApiError && error.details && typeof error.details === 'object') {
+    return error.details as Record<string, unknown>;
+  }
+  return {};
+}
+
+function toDisplayDate(value?: string): string {
+  if (!value) {
+    return '';
+  }
+  return new Date(value).toLocaleDateString();
+}
+
 export default function CollegeConnect() {
-  const [currentUser, setCurrentUser] = useState<Student | null>(null);
-  const [colleges, setColleges] = useState<CollegesData>({});
-  const [view, setView] = useState<'login' | 'dashboard' | 'addCollege' | 'profile' | 'studentProfile'>('login');
+  const [currentUser, setCurrentUser] = useState<Student | null>(() => getStoredUser());
+  const [colleges, setColleges] = useState<CollegesData>(emptyColleges);
+  const [view, setView] = useState<View>(() => (getStoredUser() ? 'dashboard' : 'login'));
   const [searchQuery, setSearchQuery] = useState('');
   const [searchType, setSearchType] = useState<'college' | 'company'>('college');
-  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
-  
-  // Registration form
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [similarColleges, setSimilarColleges] = useState<SimilarCollege[]>([]);
+
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [linkedin, setLinkedin] = useState('');
   const [newCollegeName, setNewCollegeName] = useState('');
-  
-  // Add company form
+
   const [showAddCompany, setShowAddCompany] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [visitDate, setVisitDate] = useState('');
   const [jobRoles, setJobRoles] = useState('');
   const [selectedForCompany, setSelectedForCompany] = useState(false);
   const [numberOfSelections, setNumberOfSelections] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [firebaseError, setFirebaseError] = useState<string | null>(null);
-  const [lastBackupSnapshot, setLastBackupSnapshot] = useState<CollegesData | null>(null);
 
-  // Check for emergency backups and offer recovery
-  useEffect(() => {
-    const checkEmergencyBackup = () => {
+  const refreshSnapshot = async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+    }
+
+    try {
+      const snapshot = await fetchPlacementSnapshot();
+      setColleges(snapshot);
+      setApiError(null);
+      localStorage.setItem('lastKnownGoodData', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        data: snapshot,
+      }));
+
+      setCurrentUser((previous) => {
+        if (!previous) {
+          return previous;
+        }
+        return findStudentInSnapshot(snapshot, previous.id) || previous;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not connect to backend API';
+      setApiError(message);
+
       try {
-        const emergencyBackup = localStorage.getItem('emergencyBackup');
-        const lastKnownGood = localStorage.getItem('lastKnownGoodData');
-        
-        if (emergencyBackup) {
-          const backup = JSON.parse(emergencyBackup);
-          const backupAge = Date.now() - new Date(backup.timestamp).getTime();
-          const hoursOld = Math.floor(backupAge / (1000 * 60 * 60));
-          
-          if (hoursOld < 24 && confirm(`🔄 Found emergency backup from ${hoursOld} hours ago (${backup.reason}).\n\nWould you like to restore it?`)) {
-            return backup.data;
-          }
+        const backup = localStorage.getItem('lastKnownGoodData');
+        if (backup) {
+          const parsed = JSON.parse(backup) as { data: CollegesData };
+          setColleges(parsed.data);
         }
-        
-        if (lastKnownGood) {
-          const backup = JSON.parse(lastKnownGood);
-          const backupAge = Date.now() - new Date(backup.timestamp).getTime();
-          const hoursOld = Math.floor(backupAge / (1000 * 60 * 60));
-          
-          // Auto-restore if less than 1 hour old and Firebase is empty
-          if (hoursOld < 1) {
-            return backup.data;
-          }
-        }
-      } catch (e) {
-        console.error('Failed to check emergency backups:', e);
+      } catch {
+        setColleges(emptyColleges);
       }
-      return null;
-    };
-
-    const localBackup = checkEmergencyBackup();
-    if (localBackup) {
-      setColleges(localBackup);
-      setLastBackupSnapshot(localBackup);
-      alert('✅ Restored from local backup!');
+    } finally {
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
+  };
+
+  useEffect(() => {
+    void refreshSnapshot();
+    const unsubscribe = subscribeToPlacementEvents(() => {
+      void refreshSnapshot(true);
+    });
+    return unsubscribe;
   }, []);
 
-  // Load data from Firebase on mount
-  useEffect(() => {
-    let mounted = true;
-    const collegesRef = ref(database, 'colleges');
-    
-    // Set a timeout to prevent infinite loading
-    const timeout = setTimeout(() => {
-      if (mounted && isLoading) {
-        setFirebaseError('Could not connect to Firebase. Using local data.');
-        // Try to load from localStorage backup
-        try {
-          const lastKnownGood = localStorage.getItem('lastKnownGoodData');
-          if (lastKnownGood) {
-            const backup = JSON.parse(lastKnownGood);
-            setColleges(backup.data);
-            setLastBackupSnapshot(backup.data);
-            alert('⚠️ Firebase unavailable. Loaded from local backup.');
-          } else {
-            const emptyData: CollegesData = {};
-            setColleges(emptyData);
-          }
-        } catch (e) {
-          const emptyData: CollegesData = {};
-          setColleges(emptyData);
-        }
-        setIsLoading(false);
-      }
-    }, 3000);
-    
-    // Listen for changes in colleges data
-    const unsubscribe = onValue(
-      collegesRef, 
-      (snapshot) => {
-        clearTimeout(timeout);
-        const data = snapshot.val();
-        if (data) {
-          // Migrate old data with dots in keys to new format with underscores
-          const migratedData: CollegesData = {};
-          let needsMigration = false;
-          
-          Object.keys(data).forEach(key => {
-            if (key.includes('.')) {
-              // Old format detected - needs migration
-              needsMigration = true;
-              const newKey = domainToKey(key);
-              migratedData[newKey] = data[key];
-            } else {
-              // Already in new format
-              migratedData[key] = data[key];
-            }
-          });
-          
-          if (needsMigration) {
-            // Write migrated data back to Firebase
-            set(collegesRef, migratedData).then(() => {
-              setColleges(migratedData);
-              setFirebaseError(null);
-            }).catch(() => {
-              setColleges(migratedData);
-              setFirebaseError('Data migrated locally, but Firebase write failed.');
-            });
-          } else {
-            setColleges(migratedData);
-            setFirebaseError(null);
-          }
-          // Create initial backup snapshot
-          setLastBackupSnapshot(migratedData);
-        } else {
-          // Initialize with empty data if no data exists
-          const emptyData: CollegesData = {};
-          setColleges(emptyData);
-        }
-        setIsLoading(false);
-      },
-      (error) => {
-        clearTimeout(timeout);
-        setFirebaseError(`Firebase error: ${error.message}`);
-        const emptyData: CollegesData = {};
-        setColleges(emptyData);
-        setIsLoading(false);
-      }
-    );
-    
-    // Check for saved user session
-    const savedUser = localStorage.getItem('collegeConnectUser');
-    if (savedUser) {
-      const user = JSON.parse(savedUser);
-      setCurrentUser(user);
-      setView('dashboard');
-    }
-
-    // Cleanup listener on unmount
-    return () => {
-      mounted = false;
-      clearTimeout(timeout);
-      unsubscribe();
-    };
-  }, []);
-
-  // Save colleges to Firebase with enhanced protection
-  useEffect(() => {
-    if (Object.keys(colleges).length > 0 && !isLoading) {
-      const saveData = async () => {
-        const totalStudents = Object.values(colleges).reduce((sum, c) => sum + (c?.students?.length || 0), 0);
-        const totalColleges = Object.keys(colleges).length;
-        
-        // CRITICAL PROTECTION: Prevent catastrophic data loss
-        if (lastBackupSnapshot) {
-          const lastTotalStudents = Object.values(lastBackupSnapshot).reduce((sum, c) => sum + (c?.students?.length || 0), 0);
-          const lastTotalColleges = Object.keys(lastBackupSnapshot).length;
-          
-          // If we're about to lose more than 50% of data, BLOCK the save
-          const studentLossPercent = lastTotalStudents > 0 ? ((lastTotalStudents - totalStudents) / lastTotalStudents) * 100 : 0;
-          const collegeLossPercent = lastTotalColleges > 0 ? ((lastTotalColleges - totalColleges) / lastTotalColleges) * 100 : 0;
-          
-          if (studentLossPercent > 50 || collegeLossPercent > 50) {
-            console.error('🚨 CRITICAL: Prevented catastrophic data loss!');
-            console.error(`Would have lost ${studentLossPercent.toFixed(1)}% of students and ${collegeLossPercent.toFixed(1)}% of colleges`);
-            alert(`🚨 CRITICAL ERROR: Prevented saving data that would lose ${Math.max(studentLossPercent, collegeLossPercent).toFixed(0)}% of your database!\n\nThis is likely a bug. Please refresh the page and contact support.`);
-            
-            // Restore from last known good state
-            setColleges(lastBackupSnapshot);
-            return;
-          }
-          
-          // If data decreased significantly (20-50%), create backup and warn
-          if (studentLossPercent > 20 || collegeLossPercent > 20) {
-            console.warn(`⚠️ WARNING: Data decreased by ${Math.max(studentLossPercent, collegeLossPercent).toFixed(1)}%`);
-            // Create emergency backup in localStorage
-            try {
-              localStorage.setItem('emergencyBackup', JSON.stringify({
-                timestamp: new Date().toISOString(),
-                data: lastBackupSnapshot,
-                reason: 'Significant data decrease detected'
-              }));
-            } catch (e) {
-              console.error('Failed to create emergency backup:', e);
-            }
-          }
-        }
-        
-        // Save to Firebase
-        try {
-          const collegesRef = ref(database, 'colleges');
-          await set(collegesRef, colleges);
-          
-          // Update backup snapshot after successful save
-          setLastBackupSnapshot(colleges);
-          
-          // Also save to localStorage as backup
-          try {
-            localStorage.setItem('lastKnownGoodData', JSON.stringify({
-              timestamp: new Date().toISOString(),
-              data: colleges
-            }));
-          } catch (e) {
-            console.error('LocalStorage backup failed:', e);
-          }
-          
-        } catch (error) {
-          console.error('Failed to save to Firebase:', error);
-          alert('⚠️ Warning: Failed to sync data to Firebase. Your changes may not be saved.');
-        }
-      };
-      
-      saveData();
-    }
-  }, [colleges, isLoading, lastBackupSnapshot]);
-
-  // Save current user to localStorage for session management
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem('collegeConnectUser', JSON.stringify(currentUser));
     }
   }, [currentUser]);
 
-  const extractDomain = (email: string): string | null => {
-    const match = email.match(/@(.+)$/);
-    return match ? match[1].toLowerCase() : null;
-  };
+  const myCollege = currentUser ? colleges[domainToKey(currentUser.collegeDomain)] : null;
 
-  const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
+  const stats = useMemo(() => {
+    const collegeList = Object.values(colleges);
+    return {
+      users: collegeList.reduce((sum, college) => sum + college.students.length, 0),
+      colleges: collegeList.length,
+      companies: collegeList.reduce((sum, college) => sum + college.companies.length, 0),
+    };
+  }, [colleges]);
 
-  const validateLinkedIn = (url: string): boolean => {
-    // Must include linkedin.com/in/ and should ideally start with http:// or https://
-    if (!url.includes('linkedin.com/in/')) {
-      return false;
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return [];
     }
-    // Check if it's a proper URL format
-    const hasProtocol = url.startsWith('http://') || url.startsWith('https://');
-    const hasJustDomain = url.startsWith('linkedin.com/in/') || url.startsWith('www.linkedin.com/in/');
-    return hasProtocol || hasJustDomain;
-  };
 
-  // Convert domain to Firebase-safe key (dots not allowed in Firebase keys)
-  const domainToKey = (domain: string): string => {
-    return domain.replace(/\./g, '_');
-  };
-
-  // Block personal email domains
-  const isPersonalEmailDomain = (domain: string): boolean => {
-    const personalDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'yahoo.co.in', 'rediffmail.com'];
-    return personalDomains.includes(domain.toLowerCase());
-  };
-
-  // Find similar college domains to prevent duplicates
-  const findSimilarDomains = (newDomain: string): string[] => {
-    const similar: string[] = [];
-    const domainParts = newDomain.split('.');
-    
-    // Check all existing colleges
-    Object.values(colleges).forEach(college => {
-      const existingDomain = college.domain;
-      
-      // Skip if it's the same domain
-      if (existingDomain === newDomain) return;
-      
-      // Check if domains are similar (e.g., gnits.ac vs gnits.ac.in)
-      const existingParts = existingDomain.split('.');
-      
-      // If first part matches (institution name), consider it similar
-      if (domainParts[0] === existingParts[0]) {
-        similar.push(existingDomain);
-      }
-      
-      // Check for Levenshtein distance < 3 (very similar strings)
-      const distance = getLevenshteinDistance(newDomain, existingDomain);
-      if (distance > 0 && distance <= 3) {
-        if (!similar.includes(existingDomain)) {
-          similar.push(existingDomain);
-        }
-      }
-    });
-    
-    return similar;
-  };
-
-  // Calculate Levenshtein distance between two strings
-  const getLevenshteinDistance = (str1: string, str2: string): number => {
-    const matrix: number[][] = [];
-    
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i];
+    if (searchType === 'college') {
+      return Object.values(colleges).filter((college) =>
+        college.name.toLowerCase().includes(query) || college.domain.toLowerCase().includes(query),
+      );
     }
-    
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j;
-    }
-    
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1];
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          );
-        }
+
+    const results: CompanySearchResult[] = [];
+    for (const college of Object.values(colleges)) {
+      const companies = college.companies.filter((company) => company.name.toLowerCase().includes(query));
+      if (companies.length > 0) {
+        results.push({ college, companies });
       }
     }
-    
-    return matrix[str2.length][str1.length];
-  };
+    return results;
+  }, [colleges, searchQuery, searchType]);
 
   const handleRegister = async () => {
-    if (!email || !name || !linkedin) {
+    if (!name.trim() || !email.trim() || !linkedin.trim()) {
       alert('Please fill all fields');
       return;
     }
 
-    if (!validateEmail(email)) {
-      alert('Please enter a valid email address');
+    if (!extractDomain(email)) {
+      alert('Please enter a valid college email address');
       return;
     }
 
     if (!validateLinkedIn(linkedin)) {
-      alert('Please enter a valid LinkedIn profile URL\n\nAccepted formats:\n• https://linkedin.com/in/yourprofile\n• linkedin.com/in/yourprofile\n• www.linkedin.com/in/yourprofile');
+      alert('Please enter a valid LinkedIn profile URL containing linkedin.com/in/');
       return;
     }
 
-    const domain = extractDomain(email);
-    if (!domain) {
-      alert('Invalid email');
-      return;
-    }
+    setIsSaving(true);
+    setSimilarColleges([]);
 
-    // Block personal email domains
-    if (isPersonalEmailDomain(domain)) {
-      alert('⚠️ Personal email not allowed!\n\nPlease use your college/university email address (e.g., student@college.edu).\n\nPersonal emails like Gmail, Yahoo, Hotmail are not permitted.');
-      return;
-    }
-
-    const domainKey = domainToKey(domain);
-
-    // Check if user already registered
-    const existingCollege = colleges[domainKey];
-    if (existingCollege) {
-      const existingStudent = existingCollege.students.find(s => s.email.toLowerCase() === email.toLowerCase());
-      if (existingStudent) {
-        alert('This email is already registered!');
-        setCurrentUser(existingStudent);
-        setView('dashboard');
-        return;
-      }
-    }
-
-    // Check if college exists
-    if (!existingCollege) {
-      // Check for similar domains before creating new college
-      const similarDomains = findSimilarDomains(domain);
-      
-      if (similarDomains.length > 0) {
-        const similarColleges = similarDomains.map(d => {
-          const key = domainToKey(d);
-          return `• ${colleges[key].name} (${d})`;
-        }).join('\n');
-        
-        const userChoice = confirm(
-          `⚠️ Similar college(s) found!\n\n${similarColleges}\n\nYour email domain: ${domain}\n\nDo you want to create a NEW college?\n\n• Click OK to create a new college\n• Click Cancel to review (you may want to use the correct domain)`
-        );
-        
-        if (!userChoice) {
-          alert('Registration cancelled. Please verify your email domain with your college administration.');
-          return;
-        }
-      }
-      
-      // College doesn't exist, go to add college view
-      setView('addCollege');
-      return;
-    }
-
-    // Add student to college directly
-    const newStudent: Student = {
-      id: Date.now(),
-      name,
-      email: email.toLowerCase(),
-      linkedin,
-      collegeDomain: domain,
-      selections: [],
-      registeredAt: new Date().toISOString()
-    };
-
-    const updatedColleges = {
-      ...colleges,
-      [domainKey]: {
-        ...existingCollege,
-        students: [...existingCollege.students, newStudent]
-      }
-    };
-
-    // Save to Firebase first, then update state
     try {
-      const collegesRef = ref(database, 'colleges');
-      await set(collegesRef, updatedColleges);
-      
-      // Only update state and proceed after successful Firebase save
-      setColleges(updatedColleges);
-      setCurrentUser(newStudent);
+      const response = await registerStudent({ name, email, linkedin });
+      localStorage.setItem('collegeConnectToken', response.token);
+      setCurrentUser(response.student);
       setView('dashboard');
       setEmail('');
       setName('');
       setLinkedin('');
+      await refreshSnapshot(true);
     } catch (error) {
-      console.error('Firebase save error:', error);
-      // Still allow local registration
-      setColleges(updatedColleges);
-      setCurrentUser(newStudent);
-      setView('dashboard');
-      setEmail('');
-      setName('');
-      setLinkedin('');
-      alert('Registered locally. Please check your internet connection.');
+      const details = getApiDetails(error);
+      if (error instanceof ApiError && error.code === 'COLLEGE_REQUIRED') {
+        setSimilarColleges((details.similarColleges as SimilarCollege[]) || []);
+        setView('addCollege');
+      } else {
+        alert(error instanceof Error ? error.message : 'Registration failed');
+      }
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleAddCollege = async () => {
-    if (!newCollegeName) {
+    if (!newCollegeName.trim()) {
       alert('Please enter college name');
       return;
     }
 
-    const domain = extractDomain(email);
-    if (!domain) {
-      alert('Invalid email domain');
-      return;
-    }
-
-    // Double-check personal email domains
-    if (isPersonalEmailDomain(domain)) {
-      alert('⚠️ Cannot create college with personal email domain!\n\nPlease use your official college/university email address.');
-      setView('login');
-      return;
-    }
-
-    // Final check for similar domains
-    const similarDomains = findSimilarDomains(domain);
-    if (similarDomains.length > 0) {
-      const similarColleges = similarDomains.map(d => {
-        const key = domainToKey(d);
-        return `• ${colleges[key].name} (${d})`;
-      }).join('\n');
-      
-      alert(`⚠️ WARNING: Similar colleges exist!\n\n${similarColleges}\n\nYou are creating: ${newCollegeName} (${domain})\n\nIf this is a duplicate, it may cause data split issues.`);
-    }
-
-    const domainKey = domainToKey(domain); // Convert to Firebase-safe key
-
-    const newStudent: Student = {
-      id: Date.now(),
-      name,
-      email: email.toLowerCase(),
-      linkedin,
-      collegeDomain: domain,
-      selections: [],
-      registeredAt: new Date().toISOString()
-    };
-
-    const updatedColleges = {
-      ...colleges,
-      [domainKey]: {
-        name: newCollegeName,
-        domain,
-        students: [newStudent],
-        companies: [],
-        createdAt: new Date().toISOString()
-      }
-    };
-
-    // Save to Firebase first
+    setIsSaving(true);
     try {
-      const collegesRef = ref(database, 'colleges');
-      await set(collegesRef, updatedColleges);
-      
-      setColleges(updatedColleges);
-      setCurrentUser(newStudent);
-      setView('dashboard');
-      setNewCollegeName('');
-      setEmail('');
-      setName('');
-      setLinkedin('');
-    } catch (error) {
-      console.error('Firebase save error:', error);
-      // Still allow local registration
-      setColleges(updatedColleges);
-      setCurrentUser(newStudent);
-      setView('dashboard');
-      setNewCollegeName('');
-      setEmail('');
-      setName('');
-      setLinkedin('');
-      alert('College created locally. Please check your internet connection.');
-    }
-  };
-
-  const handleAddCompany = () => {
-    if (!companyName || !currentUser) {
-      alert('Please fill all required fields');
-      return;
-    }
-
-    // Get myCollege dynamically inside the function
-    const domainKey = domainToKey(currentUser.collegeDomain);
-    const myCollege = colleges[domainKey];
-
-    if (!myCollege) {
-      console.error('College not found for domain:', currentUser.collegeDomain);
-      alert('Error: Your college data could not be found. Please try logging in again.');
-      return;
-    }
-
-    if (!myCollege.companies) {
-      myCollege.companies = [];
-    }
-
-    const existingCompany = myCollege.companies.find(c => c.name.toLowerCase() === companyName.toLowerCase());
-
-    if (existingCompany) {
-      alert('Company already added to this college');
-      return;
-    }
-
-    const newCompany: CompanyVisit = {
-      id: Date.now(),
-      name: companyName,
-      addedBy: currentUser.id,
-      selectedStudents: selectedForCompany ? [currentUser.id] : [],
-      visitDate: visitDate || undefined,
-      jobRoles: jobRoles ? jobRoles.split(',').map(r => r.trim()).filter(r => r) : undefined,
-      totalSelections: numberOfSelections ? parseInt(numberOfSelections) : undefined,
-      addedAt: new Date().toISOString()
-    };
-
-    const updatedColleges = {
-      ...colleges,
-      [domainKey]: {
-        ...myCollege,
-        companies: [...myCollege.companies, newCompany]
-      }
-    };
-
-    // Update student selections if they marked themselves as selected
-    if (selectedForCompany) {
-      const studentIndex = myCollege.students.findIndex((s: Student) => s.id === currentUser.id);
-      if (studentIndex !== -1) {
-        const updatedStudents = [...myCollege.students];
-        updatedStudents[studentIndex] = {
-          ...updatedStudents[studentIndex],
-          selections: [...(updatedStudents[studentIndex].selections || []), {
-            companyName,
-            selectedAt: new Date().toISOString()
-          }]
-        };
-        updatedColleges[domainKey].students = updatedStudents;
-        
-        // Update current user
-        setCurrentUser(updatedStudents[studentIndex]);
-      }
-    }
-
-    setColleges(updatedColleges);
-    setCompanyName('');
-    setVisitDate('');
-    setJobRoles('');
-    setSelectedForCompany(false);
-    setNumberOfSelections('');
-    setShowAddCompany(false);
-  };
-
-  const toggleSelection = (companyName: string) => {
-    if (!currentUser) return;
-
-    // Get myCollege dynamically inside the function
-    const domainKey = domainToKey(currentUser.collegeDomain);
-    const myCollege = colleges[domainKey];
-
-    if (!myCollege) {
-      alert('Error: Your college data could not be found. Please try logging in again.');
-      return;
-    }
-
-    const companyIndex = myCollege.companies.findIndex(c => c.name === companyName);
-    
-    if (companyIndex === -1) return;
-
-    const company = myCollege.companies[companyIndex];
-    const isSelected = (company.selectedStudents || []).includes(currentUser.id);
-    
-    const updatedCompanies = [...myCollege.companies];
-    updatedCompanies[companyIndex] = {
-      ...company,
-      selectedStudents: isSelected 
-        ? (company.selectedStudents || []).filter(id => id !== currentUser.id)
-        : [...(company.selectedStudents || []), currentUser.id]
-    };
-
-    // Update student selections
-    const studentIndex = myCollege.students.findIndex((s: Student) => s.id === currentUser.id);
-    const updatedStudents = [...myCollege.students];
-    
-    if (isSelected) {
-      // Remove selection
-      updatedStudents[studentIndex] = {
-        ...updatedStudents[studentIndex],
-        selections: (updatedStudents[studentIndex].selections || []).filter(s => s.companyName !== companyName)
-      };
-    } else {
-      // Add selection
-      updatedStudents[studentIndex] = {
-        ...updatedStudents[studentIndex],
-        selections: [...(updatedStudents[studentIndex].selections || []), {
-          companyName,
-          selectedAt: new Date().toISOString()
-        }]
-      };
-    }
-
-    setColleges({
-      ...colleges,
-      [domainKey]: {
-        ...myCollege,
-        companies: updatedCompanies,
-        students: updatedStudents
-      }
-    });
-
-    // Update current user
-    setCurrentUser(updatedStudents[studentIndex]);
-  };
-
-  const getSearchResults = () => {
-    if (!searchQuery) return [];
-
-    const query = searchQuery.toLowerCase();
-
-    if (searchType === 'college') {
-      return Object.values(colleges).filter(college =>
-        college.name.toLowerCase().includes(query)
-      );
-    } else {
-      const results: CompanySearchResult[] = [];
-      Object.values(colleges).forEach(college => {
-        if (college.companies && Array.isArray(college.companies)) {
-          const matchingCompanies = college.companies.filter(company =>
-            company.name.toLowerCase().includes(query)
-          );
-          if (matchingCompanies.length > 0) {
-            results.push({ college, companies: matchingCompanies });
-          }
-        }
+      const response = await registerStudent({
+        name,
+        email,
+        linkedin,
+        collegeName: newCollegeName,
       });
-      return results;
+      localStorage.setItem('collegeConnectToken', response.token);
+      setCurrentUser(response.student);
+      setView('dashboard');
+      setNewCollegeName('');
+      setEmail('');
+      setName('');
+      setLinkedin('');
+      await refreshSnapshot(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'College creation failed');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddCompany = async () => {
+    if (!companyName.trim()) {
+      alert('Please enter company name');
+      return;
+    }
+
+    const totalSelections = numberOfSelections.trim()
+      ? Number.parseInt(numberOfSelections, 10)
+      : undefined;
+
+    if (totalSelections !== undefined && Number.isNaN(totalSelections)) {
+      alert('Number of selections must be a valid number');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await addCompanyVisit({
+        name: companyName,
+        visitDate: visitDate || undefined,
+        jobRoles: jobRoles.split(',').map((role) => role.trim()).filter(Boolean),
+        selectedForCurrentUser: selectedForCompany,
+        totalSelections,
+      });
+
+      setCompanyName('');
+      setVisitDate('');
+      setJobRoles('');
+      setSelectedForCompany(false);
+      setNumberOfSelections('');
+      setShowAddCompany(false);
+      await refreshSnapshot(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not add company visit');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleSelection = async (companyId: string) => {
+    setIsSaving(true);
+    try {
+      await toggleCompanySelection(companyId);
+      await refreshSnapshot(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not update selection');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem('collegeConnectToken');
     localStorage.removeItem('collegeConnectUser');
     setView('login');
   };
 
-  const viewStudentProfile = (studentId: number) => {
-    setSelectedStudentId(studentId);
-    setView('studentProfile');
-  };
+  const selectedStudent = selectedStudentId ? findStudentInSnapshot(colleges, selectedStudentId) : null;
+  const selectedStudentCollege = selectedStudent
+    ? colleges[domainToKey(selectedStudent.collegeDomain)]
+    : null;
 
-  const getStudentById = (studentId: number): Student | null => {
-    for (const domainKey of Object.keys(colleges)) {
-      const college = colleges[domainKey];
-      if (college && college.students && Array.isArray(college.students)) {
-        const student = college.students.find(s => s.id === studentId);
-        if (student) return student;
-      }
-    }
-    return null;
-  };
-
-  const getCollegeByDomain = (domain: string): College | null => {
-    const domainKey = domainToKey(domain);
-    return colleges[domainKey] || null;
-  };
-
-  const myCollege = currentUser ? colleges[domainToKey(currentUser.collegeDomain)] : null;
-  const searchResults = getSearchResults();
-
-  // Calculate total registered users across all colleges
-  const getTotalUsers = (): number => {
-    if (!colleges || typeof colleges !== 'object') return 0;
-    return Object.values(colleges).reduce((total, college) => {
-      return total + (college?.students?.length || 0);
-    }, 0);
-  };
-
-  // Calculate total colleges
-  const getTotalColleges = (): number => {
-    if (!colleges || typeof colleges !== 'object') return 0;
-    return Object.keys(colleges).length;
-  };
-
-  // Calculate total companies
-  const getTotalCompanies = (): number => {
-    if (!colleges || typeof colleges !== 'object') return 0;
-    return Object.values(colleges).reduce((total, college) => {
-      return total + (college?.companies?.length || 0);
-    }, 0);
-  };
-
-  // Loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-16 h-16 mx-auto text-indigo-600 animate-spin mb-4" />
-          <p className="text-gray-600 text-lg">Connecting to Firebase...</p>
+          <Loader2 className="w-14 h-14 mx-auto text-indigo-600 animate-spin mb-4" />
+          <p className="text-slate-600 text-lg">Connecting to placement network...</p>
         </div>
       </div>
     );
   }
 
-  // Check if currentUser exists but their college data is not loaded
-  if (currentUser && !myCollege && view !== 'login') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-16 h-16 mx-auto text-indigo-600 animate-spin mb-4" />
-          <p className="text-gray-600 text-lg">Loading your college data...</p>
-          <button
-            onClick={handleLogout}
-            className="mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-          >
-            Logout and try again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Login view
   if (view === 'login') {
-    // Show registration form
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-8 w-full max-w-md">
           <div className="text-center mb-8">
             <GraduationCap className="w-16 h-16 mx-auto text-indigo-600 mb-4" />
-            <h1 className="text-3xl font-bold text-gray-900">College Connect</h1>
-            <p className="text-gray-600 mt-2">Connect with students across colleges</p>
-            {!firebaseError ? (
-              <p className="text-xs text-green-600 mt-1">🔥 Real-time sync enabled</p>
-            ) : (
-              <p className="text-xs text-yellow-600 mt-1">⚠️ Using local data (Firebase not connected)</p>
-            )}
+            <h1 className="text-3xl font-bold text-slate-950">College Connect</h1>
+            <p className="text-slate-600 mt-2">Placement collaboration across colleges</p>
+            <p className={`text-xs mt-2 ${apiError ? 'text-amber-600' : 'text-emerald-700'}`}>
+              {apiError ? 'Offline snapshot mode' : 'Realtime API online'}
+            </p>
           </div>
 
-          {firebaseError && (
-            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-xs text-yellow-800">{firebaseError}</p>
-              <p className="text-xs text-yellow-600 mt-1">
-                Check Firebase Console: Database must be enabled and rules must allow access.
-              </p>
+          {apiError && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800">{apiError}</p>
             </div>
           )}
 
           <div className="space-y-4">
-            <div>
-              <label htmlFor="register-name" className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+            <label className="block">
+              <span className="block text-sm font-medium text-slate-700 mb-2">Full Name</span>
               <input
-                id="register-name"
-                name="name"
-                type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                onChange={(event) => setName(event.target.value)}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="Enter your name"
               />
-            </div>
+            </label>
 
-            <div>
-              <label htmlFor="register-email" className="block text-sm font-medium text-gray-700 mb-2">College Email</label>
+            <label className="block">
+              <span className="block text-sm font-medium text-slate-700 mb-2">College Email</span>
               <input
-                id="register-email"
-                name="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                onChange={(event) => setEmail(event.target.value)}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="your.name@college.edu"
               />
-              <p className="text-xs text-gray-500 mt-1">Use your college email (e.g., student@iitd.ac.in)</p>
-            </div>
+            </label>
 
-            <div>
-              <label htmlFor="register-linkedin" className="block text-sm font-medium text-gray-700 mb-2">LinkedIn Profile</label>
+            <label className="block">
+              <span className="block text-sm font-medium text-slate-700 mb-2">LinkedIn Profile</span>
               <input
-                id="register-linkedin"
-                name="linkedin"
-                type="text"
                 value={linkedin}
-                onChange={(e) => setLinkedin(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                onChange={(event) => setLinkedin(event.target.value)}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="linkedin.com/in/yourprofile"
               />
-              <p className="text-xs text-gray-500 mt-1">Enter your LinkedIn profile URL</p>
-            </div>
+            </label>
 
             <button
               onClick={handleRegister}
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition"
+              disabled={isSaving}
+              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition disabled:opacity-60"
             >
-              Register
+              {isSaving ? 'Registering...' : 'Register'}
             </button>
           </div>
         </div>
@@ -895,53 +403,69 @@ export default function CollegeConnect() {
     );
   }
 
-  // Add college view
   if (view === 'addCollege') {
+    const domain = extractDomain(email);
+
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-8 w-full max-w-md">
           <div className="text-center mb-8">
             <Building2 className="w-16 h-16 mx-auto text-indigo-600 mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900">New College Detected!</h2>
-            <p className="text-gray-600 mt-2">We haven't seen <span className="font-semibold">{extractDomain(email)}</span> before</p>
+            <h2 className="text-2xl font-bold text-slate-950">Add College</h2>
+            <p className="text-slate-600 mt-2">{domain} is not registered yet</p>
           </div>
 
+          {similarColleges.length > 0 && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm font-medium text-amber-900 mb-2">Similar colleges found</p>
+              <div className="space-y-1">
+                {similarColleges.map((college) => (
+                  <p key={college.domainKey} className="text-sm text-amber-800">
+                    {college.name} ({college.domain})
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4">
-            <div>
-              <label htmlFor="college-name" className="block text-sm font-medium text-gray-700 mb-2">College Name</label>
+            <label className="block">
+              <span className="block text-sm font-medium text-slate-700 mb-2">College Name</span>
               <input
-                id="college-name"
-                name="collegeName"
-                type="text"
                 value={newCollegeName}
-                onChange={(e) => setNewCollegeName(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                onChange={(event) => setNewCollegeName(event.target.value)}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="Enter your college name"
               />
-            </div>
+            </label>
 
-            <button
-              onClick={handleAddCollege}
-              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition"
-            >
-              Add College & Continue
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setView('login')}
+                className="px-4 py-3 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleAddCollege}
+                disabled={isSaving}
+                className="px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition disabled:opacity-60"
+              >
+                {isSaving ? 'Saving...' : 'Continue'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  // Student Profile view
-  if (view === 'studentProfile' && selectedStudentId) {
-    const student = getStudentById(selectedStudentId);
-    const studentCollege = student ? getCollegeByDomain(student.collegeDomain) : null;
-
-    if (!student || !studentCollege) {
+  if (view === 'studentProfile') {
+    if (!selectedStudent || !selectedStudentCollege) {
       return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
           <div className="text-center">
-            <p className="text-gray-600 mb-4">Student not found</p>
+            <p className="text-slate-600 mb-4">Student not found</p>
             <button
               onClick={() => setView('dashboard')}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
@@ -954,12 +478,12 @@ export default function CollegeConnect() {
     }
 
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white shadow-sm">
+      <div className="min-h-screen bg-slate-50">
+        <div className="bg-white border-b border-slate-200">
           <div className="max-w-7xl mx-auto px-4 py-4">
-            <button 
+            <button
               onClick={() => setView('dashboard')}
-              className="flex items-center gap-2 text-indigo-600 hover:text-indigo-700"
+              className="flex items-center gap-2 text-indigo-700 hover:text-indigo-800"
             >
               <ArrowLeft className="w-5 h-5" />
               Back to Dashboard
@@ -967,418 +491,237 @@ export default function CollegeConnect() {
           </div>
         </div>
 
-        <div className="max-w-4xl mx-auto px-4 py-8">
-          <div className="bg-white rounded-xl shadow-sm p-8">
-            <div className="flex items-start gap-6 mb-6">
+        <main className="max-w-4xl mx-auto px-4 py-8">
+          <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-8">
+            <div className="flex flex-col sm:flex-row sm:items-start gap-6 mb-6">
               <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center">
                 <User className="w-10 h-10 text-indigo-600" />
               </div>
               <div className="flex-1">
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">{student.name}</h1>
-                <p className="text-gray-600 mb-2">{student.email}</p>
-                <p className="text-indigo-600 font-medium mb-3">{studentCollege.name}</p>
+                <h1 className="text-3xl font-bold text-slate-950 mb-2">{selectedStudent.name}</h1>
+                <p className="text-slate-600 mb-2">{selectedStudent.email}</p>
+                <p className="text-indigo-700 font-medium mb-3">{selectedStudentCollege.name}</p>
                 <a
-                  href={student.linkedin.startsWith('http') ? student.linkedin : `https://${student.linkedin}`}
+                  href={selectedStudent.linkedin.startsWith('http') ? selectedStudent.linkedin : `https://${selectedStudent.linkedin}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition"
                 >
+                  LinkedIn
                   <ExternalLink className="w-4 h-4" />
-                  View LinkedIn Profile
                 </a>
               </div>
             </div>
 
-            <div className="border-t pt-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <Award className="w-6 h-6 text-yellow-500" />
-                Company Selections
+            <div>
+              <h2 className="text-xl font-semibold text-slate-950 mb-4 flex items-center gap-2">
+                <Award className="w-5 h-5 text-emerald-600" />
+                Selections
               </h2>
-              {student.selections && student.selections.length > 0 ? (
-                <div className="space-y-3">
-                  {student.selections.map((selection, idx) => {
-                    const company = (studentCollege?.companies || []).find(c => c.name === selection.companyName);
-                    return (
-                      <div key={idx} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="font-semibold text-gray-900">{selection.companyName}</h3>
-                            <p className="text-sm text-gray-600">
-                              Selected on {new Date(selection.selectedAt).toLocaleDateString()}
-                            </p>
-                            {company?.visitDate && (
-                              <p className="text-sm text-gray-600">
-                                Visit Date: {new Date(company.visitDate).toLocaleDateString()}
-                              </p>
-                            )}
-                            {company?.jobRoles && company.jobRoles.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mt-2">
-                                {company.jobRoles.map((role, i) => (
-                                  <span key={i} className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">
-                                    {role}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <CheckCircle className="w-6 h-6 text-green-600" />
-                        </div>
-                      </div>
-                    );
-                  })}
+              {selectedStudent.selections.length > 0 ? (
+                <div className="grid gap-3">
+                  {selectedStudent.selections.map((selection) => (
+                    <div key={`${selection.companyName}-${selection.selectedAt}`} className="border border-emerald-200 bg-emerald-50 rounded-lg p-4">
+                      <p className="font-semibold text-emerald-950">{selection.companyName}</p>
+                      <p className="text-sm text-emerald-700 mt-1">Selected on {toDisplayDate(selection.selectedAt)}</p>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <p className="text-gray-600">No company selections yet</p>
+                <p className="text-slate-600">No selections added yet.</p>
               )}
             </div>
-          </div>
-        </div>
+          </section>
+        </main>
       </div>
     );
   }
 
-  // My Profile view
   if (view === 'profile' && currentUser) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="max-w-4xl mx-auto px-4 py-8">
-          <button
-            onClick={() => setView('dashboard')}
-            className="flex items-center gap-2 text-indigo-600 hover:text-indigo-700 mb-6"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            Back to Dashboard
-          </button>
-
-          <div className="bg-white rounded-lg shadow-md p-8">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center">
-                <User className="w-10 h-10 text-indigo-600" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">{currentUser.name}</h1>
-                <p className="text-gray-600">{currentUser.email}</p>
-              </div>
-            </div>
-
-            <div className="grid gap-6">
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-2">College</h3>
-                <p className="text-lg text-gray-900">{myCollege?.name}</p>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-2">LinkedIn Profile</h3>
-                {currentUser.linkedin ? (
-                  <a
-                    href={currentUser.linkedin.startsWith('http') ? currentUser.linkedin : `https://${currentUser.linkedin}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-indigo-600 hover:text-indigo-700 flex items-center gap-2"
-                  >
-                    <Linkedin className="w-5 h-5" />
-                    View LinkedIn Profile
-                  </a>
-                ) : (
-                  <p className="text-gray-600">No LinkedIn profile added</p>
-                )}
-              </div>
-
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-2">Member Since</h3>
-                <p className="text-gray-900">{new Date(currentUser.registeredAt).toLocaleDateString()}</p>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-3">Company Selections ({currentUser.selections?.length || 0})</h3>
-                {currentUser.selections && currentUser.selections.length > 0 ? (
-                  <div className="space-y-2">
-                    {currentUser.selections.map((sel, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{sel.companyName}</span>
-                        <span className="text-sm text-gray-600">
-                          {new Date(sel.selectedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-600">No selections yet</p>
-                )}
-              </div>
-            </div>
+      <div className="min-h-screen bg-slate-50">
+        <div className="bg-white border-b border-slate-200">
+          <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <button
+              onClick={() => setView('dashboard')}
+              className="flex items-center gap-2 text-indigo-700 hover:text-indigo-800"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Back to Dashboard
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
           </div>
         </div>
+
+        <main className="max-w-4xl mx-auto px-4 py-8">
+          <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-8">
+            <h1 className="text-3xl font-bold text-slate-950 mb-6">My Profile</h1>
+            <div className="space-y-4">
+              <p><span className="font-medium text-slate-700">Name:</span> {currentUser.name}</p>
+              <p><span className="font-medium text-slate-700">Email:</span> {currentUser.email}</p>
+              <p><span className="font-medium text-slate-700">College:</span> {myCollege?.name || currentUser.collegeDomain}</p>
+              <p><span className="font-medium text-slate-700">Joined:</span> {toDisplayDate(currentUser.registeredAt)}</p>
+            </div>
+          </section>
+        </main>
       </div>
     );
   }
 
-  // Dashboard view
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <GraduationCap className="w-8 h-8 text-indigo-600" />
-              <h1 className="text-xl font-bold text-gray-900">College Connect</h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={() => setView('profile')}
-                className="flex items-center gap-2 px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition cursor-pointer"
-              >
-                <User className="w-5 h-5" />
-                <div className="text-left">
-                  <p className="font-medium text-sm">{currentUser?.name}</p>
-                  <p className="text-xs text-gray-600">{myCollege?.name}</p>
-                </div>
-              </button>
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"
-              >
-                <LogOut className="w-5 h-5" />
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Statistics Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-indigo-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Total Users</p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">{getTotalUsers()}</p>
-              </div>
-              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                <Users className="w-5 h-5 text-indigo-600" />
-              </div>
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <GraduationCap className="w-9 h-9 text-indigo-600" />
+            <div>
+              <h1 className="text-2xl font-bold text-slate-950">College Connect</h1>
+              <p className="text-sm text-slate-600">{currentUser ? `${currentUser.name} - ${myCollege?.name || currentUser.collegeDomain}` : 'Placement dashboard'}</p>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Total Colleges</p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">{getTotalColleges()}</p>
-              </div>
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                <Building2 className="w-5 h-5 text-green-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-purple-500">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Total Companies</p>
-                <p className="text-3xl font-bold text-gray-900 mt-1">{getTotalCompanies()}</p>
-              </div>
-              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                <Briefcase className="w-5 h-5 text-purple-600" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Search Section */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Search Platform</h2>
-          <div className="flex gap-4 mb-4">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setSearchType('college')}
-              className={`px-4 py-2 rounded-lg font-medium transition ${
-                searchType === 'college' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700'
-              }`}
+              onClick={() => setView('profile')}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition"
             >
-              <Building2 className="w-4 h-4 inline mr-2" />
-              Search Colleges
+              <User className="w-4 h-4" />
+              Profile
             </button>
             <button
-              onClick={() => setSearchType('company')}
-              className={`px-4 py-2 rounded-lg font-medium transition ${
-                searchType === 'company' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700'
-              }`}
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-700 rounded-lg hover:bg-rose-100 transition"
             >
-              <Briefcase className="w-4 h-4 inline mr-2" />
-              Search Companies
+              <LogOut className="w-4 h-4" />
+              Logout
             </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        {apiError && (
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-sm text-amber-900">{apiError}</p>
+          </div>
+        )}
+
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600">Students</p>
+                <p className="text-3xl font-bold text-slate-950">{stats.users}</p>
+              </div>
+              <Users className="w-9 h-9 text-indigo-600" />
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600">Colleges</p>
+                <p className="text-3xl font-bold text-slate-950">{stats.colleges}</p>
+              </div>
+              <Building2 className="w-9 h-9 text-emerald-600" />
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600">Companies</p>
+                <p className="text-3xl font-bold text-slate-950">{stats.companies}</p>
+              </div>
+              <Briefcase className="w-9 h-9 text-violet-600" />
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+            <h2 className="text-2xl font-bold text-slate-950 flex items-center gap-2">
+              <Search className="w-6 h-6 text-indigo-600" />
+              Search Network
+            </h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSearchType('college')}
+                className={`px-4 py-2 rounded-lg font-medium transition ${searchType === 'college' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+              >
+                Colleges
+              </button>
+              <button
+                onClick={() => setSearchType('company')}
+                className={`px-4 py-2 rounded-lg font-medium transition ${searchType === 'company' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}
+              >
+                Companies
+              </button>
+            </div>
           </div>
 
           <div className="relative">
-            <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
             <input
-              id="search-query"
-              name="searchQuery"
-              type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              placeholder={`Search for ${searchType === 'college' ? 'colleges' : 'companies'}...`}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder={`Search ${searchType === 'college' ? 'colleges' : 'companies'}...`}
             />
           </div>
 
-          {searchQuery && (
+          {searchQuery.trim() && (
             <div className="mt-6">
-              <h3 className="font-semibold text-gray-900 mb-3">
-                Search Results ({searchResults.length} found)
+              <h3 className="font-semibold text-slate-950 mb-3">
+                Results ({searchResults.length})
               </h3>
               {searchType === 'college' ? (
-                <div className="space-y-3">
+                <div className="grid gap-3">
                   {(searchResults as College[]).map((college) => (
-                    <div key={college.domain} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-gray-900 text-lg">{college.name}</h4>
-                          <p className="text-sm text-gray-600 mb-3">{college.domain}</p>
-                          
-                          <div className="mb-3">
-                            <p className="text-sm font-medium text-gray-700 mb-2">Companies Visited:</p>
-                            <div className="space-y-3">
-                              {(college.companies || []).map((company) => {
-                                const selectedStudents = (college.students || []).filter(s => 
-                                  (company.selectedStudents || []).includes(s.id)
-                                );
-                                return (
-                                  <div key={company.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                                    <div className="flex items-center justify-between mb-2">
-                                      <span className="font-semibold text-gray-900">{company.name}</span>
-                                      <span className="text-sm text-gray-600">
-                                        {company.totalSelections !== undefined ? company.totalSelections : selectedStudents.length} selected
-                                      </span>
-                                    </div>
-                                    {selectedStudents.length > 0 && (
-                                      <div className="mt-2">
-                                        <p className="text-xs text-gray-600 mb-2">Selected Students:</p>
-                                        <div className="flex flex-wrap gap-2">
-                                          {selectedStudents.map((student) => (
-                                            <button
-                                              key={student.id}
-                                              onClick={() => viewStudentProfile(student.id)}
-                                              className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs hover:bg-green-200 transition cursor-pointer flex items-center gap-1"
-                                            >
-                                              <User className="w-3 h-3" />
-                                              {student.name}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                              {(college.companies || []).length === 0 && (
-                                <span className="text-sm text-gray-500">No companies added yet</span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
-                            <span className="flex items-center gap-1">
-                              <Users className="w-4 h-4" />
-                              {(college.students || []).length} students
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Building2 className="w-4 h-4" />
-                              {(college.companies || []).length} companies
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    <CollegeResult
+                      key={college.domain}
+                      college={college}
+                      onStudentOpen={(studentId) => {
+                        setSelectedStudentId(studentId);
+                        setView('studentProfile');
+                      }}
+                    />
                   ))}
-                  {searchResults.length === 0 && (
-                    <p className="text-gray-600 text-center py-8">No colleges found matching "{searchQuery}"</p>
-                  )}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {(searchResults as CompanySearchResult[]).map((result, idx) => (
-                    <div key={idx} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
-                      <h4 className="font-semibold text-gray-900 text-lg mb-3">{result.college.name}</h4>
-                      <div className="space-y-2">
-                        {(result.companies || []).map((company) => {
-                          const selectedStudents = (result.college.students || []).filter(s => 
-                            (company.selectedStudents || []).includes(s.id)
-                          );
-                          return (
-                            <div key={company.id} className="bg-green-50 border border-green-200 rounded-lg p-3">
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <h5 className="font-medium text-green-900">{company.name}</h5>
-                                  {company.visitDate && (
-                                    <p className="text-sm text-green-700 flex items-center gap-1 mt-1">
-                                      <Calendar className="w-3 h-3" />
-                                      Visit: {new Date(company.visitDate).toLocaleDateString()}
-                                    </p>
-                                  )}
-                                  {company.jobRoles && company.jobRoles.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-2">
-                                      {company.jobRoles.map((role, i) => (
-                                        <span key={i} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">
-                                          {role}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                  <p className="text-sm text-green-700 mt-2 font-medium">
-                                    {company.totalSelections !== undefined 
-                                      ? `${company.totalSelections} students selected by company`
-                                      : `${selectedStudents.length} students marked selected`}
-                                  </p>
-                                  {selectedStudents.length > 0 && (
-                                    <div className="mt-3 pt-3 border-t border-green-300">
-                                      <p className="text-xs text-green-800 font-semibold mb-2">Selected Students:</p>
-                                      <div className="flex flex-wrap gap-2">
-                                        {selectedStudents.map((student) => (
-                                          <button
-                                            key={student.id}
-                                            onClick={() => viewStudentProfile(student.id)}
-                                            className="px-3 py-1.5 bg-white border border-green-300 text-green-800 rounded-lg text-xs hover:bg-green-100 transition cursor-pointer flex items-center gap-1.5"
-                                          >
-                                            <User className="w-3 h-3" />
-                                            <span className="font-medium">{student.name}</span>
-                                            <ExternalLink className="w-3 h-3" />
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                <div className="grid gap-3">
+                  {(searchResults as CompanySearchResult[]).map((result) => (
+                    <CompanyResult
+                      key={`${result.college.domain}-${result.companies.map((company) => company.id).join('-')}`}
+                      result={result}
+                      onStudentOpen={(studentId) => {
+                        setSelectedStudentId(studentId);
+                        setView('studentProfile');
+                      }}
+                    />
                   ))}
-                  {searchResults.length === 0 && (
-                    <p className="text-gray-600 text-center py-8">No companies found matching "{searchQuery}"</p>
-                  )}
                 </div>
               )}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* My College Section */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+        <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+            <h2 className="text-2xl font-bold text-slate-950 flex items-center gap-2">
               <Building2 className="w-7 h-7 text-indigo-600" />
-              My College - {myCollege?.name || 'Loading...'}
+              {myCollege?.name || 'My College'}
             </h2>
             <button
               onClick={() => setShowAddCompany(true)}
-              disabled={!myCollege}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!myCollege || isSaving}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60"
             >
               <Plus className="w-4 h-4" />
               Add Company Visit
@@ -1386,74 +729,55 @@ export default function CollegeConnect() {
           </div>
 
           {showAddCompany && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
-              <h3 className="font-semibold text-gray-900 mb-3">Add Company Visit</h3>
-              <div className="space-y-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
+              <h3 className="font-semibold text-slate-950 mb-3">Add Company Visit</h3>
+              <div className="grid gap-3">
                 <input
-                  id="company-name"
-                  name="companyName"
-                  type="text"
                   value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="Company name (e.g., Google, Microsoft)"
+                  onChange={(event) => setCompanyName(event.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  placeholder="Company name"
                 />
                 <input
-                  id="visit-date"
-                  name="visitDate"
                   type="date"
                   value={visitDate}
-                  onChange={(e) => setVisitDate(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="Visit date (optional)"
+                  onChange={(event) => setVisitDate(event.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
                 />
                 <input
-                  id="job-roles"
-                  name="jobRoles"
-                  type="text"
                   value={jobRoles}
-                  onChange={(e) => setJobRoles(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="Job roles (comma-separated, e.g., SDE-1, SDE-2)"
+                  onChange={(event) => setJobRoles(event.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  placeholder="Job roles, comma-separated"
                 />
                 <input
-                  id="number-of-selections"
-                  name="numberOfSelections"
                   type="number"
                   value={numberOfSelections}
-                  onChange={(e) => setNumberOfSelections(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="Number of students selected (optional)"
+                  onChange={(event) => setNumberOfSelections(event.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                  placeholder="Number of students selected"
                   min="0"
                 />
-                <label htmlFor="selected-for-company" className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
-                    id="selected-for-company"
-                    name="selectedForCompany"
                     type="checkbox"
                     checked={selectedForCompany}
-                    onChange={(e) => setSelectedForCompany(e.target.checked)}
+                    onChange={(event) => setSelectedForCompany(event.target.checked)}
                     className="w-4 h-4"
                   />
-                  <span className="text-sm text-gray-700">I got selected by this company</span>
+                  I got selected by this company
                 </label>
                 <div className="flex gap-2">
                   <button
                     onClick={handleAddCompany}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                    disabled={isSaving}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-60"
                   >
-                    Add Company
+                    {isSaving ? 'Saving...' : 'Add Company'}
                   </button>
                   <button
-                    onClick={() => {
-                      setShowAddCompany(false);
-                      setCompanyName('');
-                      setVisitDate('');
-                      setJobRoles('');
-                      setSelectedForCompany(false);
-                      setNumberOfSelections('');
-                    }}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    onClick={() => setShowAddCompany(false)}
+                    className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
                   >
                     Cancel
                   </button>
@@ -1462,86 +786,102 @@ export default function CollegeConnect() {
             </div>
           )}
 
-          <div className="mb-6">
-            <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+          <div className="mb-8">
+            <h3 className="font-semibold text-slate-950 mb-3 flex items-center gap-2">
               <Briefcase className="w-5 h-5" />
-              Companies Visited ({myCollege?.companies?.length || 0})
+              Companies Visited ({myCollege?.companies.length || 0})
             </h3>
             <div className="grid gap-3">
-              {myCollege?.companies?.map((company) => (
-                <div key={company.id} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900">{company.name}</h4>
-                      <div className="flex flex-wrap gap-4 text-sm text-gray-600 mt-1">
-                        {company.totalSelections !== undefined ? (
-                          <span className="font-medium text-green-700">
-                            {company.totalSelections} students selected by company
+              {myCollege?.companies.map((company) => {
+                const selectedStudents = myCollege.students.filter((student) =>
+                  company.selectedStudents.includes(student.id),
+                );
+                const isSelected = currentUser ? company.selectedStudents.includes(currentUser.id) : false;
+
+                return (
+                  <div key={company.id} className="border border-slate-200 rounded-lg p-4 hover:border-indigo-300 transition">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-slate-950">{company.name}</h4>
+                        <div className="flex flex-wrap gap-4 text-sm text-slate-600 mt-1">
+                          <span className="font-medium text-emerald-700">
+                            {company.totalSelections ?? selectedStudents.length} selected
                           </span>
-                        ) : (
-                          <span>{(company.selectedStudents || []).length} students marked selected</span>
+                          {company.visitDate && (
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              {toDisplayDate(company.visitDate)}
+                            </span>
+                          )}
+                        </div>
+                        {company.jobRoles.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {company.jobRoles.map((role) => (
+                              <span key={role} className="px-2 py-1 bg-violet-50 text-violet-700 rounded text-xs">
+                                {role}
+                              </span>
+                            ))}
+                          </div>
                         )}
-                        {company.visitDate && (
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {new Date(company.visitDate).toLocaleDateString()}
-                          </span>
+                        {selectedStudents.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            {selectedStudents.map((student) => (
+                              <button
+                                key={student.id}
+                                onClick={() => {
+                                  setSelectedStudentId(student.id);
+                                  setView('studentProfile');
+                                }}
+                                className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs hover:bg-emerald-100 transition flex items-center gap-1"
+                              >
+                                <User className="w-3 h-3" />
+                                {student.name}
+                              </button>
+                            ))}
+                          </div>
                         )}
                       </div>
-                      {company.jobRoles && company.jobRoles.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {company.jobRoles.map((role, i) => (
-                            <span key={i} className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">
-                              {role}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {currentUser && (
                       <button
-                        onClick={() => toggleSelection(company.name)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-                          (company.selectedStudents || []).includes(currentUser.id)
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        onClick={() => handleToggleSelection(company.id)}
+                        disabled={isSaving}
+                        className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition disabled:opacity-60 ${
+                          isSelected
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                         }`}
                       >
                         <CheckCircle className="w-4 h-4" />
-                        {(company.selectedStudents || []).includes(currentUser.id) ? 'Selected' : 'Mark as Selected'}
+                        {isSelected ? 'Selected' : 'Mark Selected'}
                       </button>
-                    )}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {(!myCollege?.companies || myCollege.companies.length === 0) && (
-                <p className="text-gray-600 text-center py-8">No companies added yet. Be the first to add one!</p>
+                );
+              })}
+              {(!myCollege || myCollege.companies.length === 0) && (
+                <p className="text-slate-600 text-center py-8">No companies added yet.</p>
               )}
             </div>
           </div>
 
           <div>
-            <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+            <h3 className="font-semibold text-slate-950 mb-3 flex items-center gap-2">
               <Users className="w-5 h-5" />
-              Students ({myCollege?.students?.length || 0})
+              Students ({myCollege?.students.length || 0})
             </h3>
             <div className="grid gap-3">
-              {myCollege?.students?.map((student) => (
-                <div key={student.id} className="border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition">
-                  <div className="flex items-center justify-between">
+              {myCollege?.students.map((student) => (
+                <div key={student.id} className="border border-slate-200 rounded-lg p-4 hover:border-indigo-300 transition">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="flex-1">
-                      <h4 className="font-semibold text-gray-900">{student.name}</h4>
-                      <p className="text-sm text-gray-600">{student.email}</p>
-                      {student.selections && student.selections.length > 0 && (
-                        <div className="mt-2">
-                          <p className="text-xs text-gray-500 mb-1">Selected by:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {student.selections.map((sel, idx) => (
-                              <span key={idx} className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
-                                {sel.companyName}
-                              </span>
-                            ))}
-                          </div>
+                      <h4 className="font-semibold text-slate-950">{student.name}</h4>
+                      <p className="text-sm text-slate-600">{student.email}</p>
+                      {student.selections.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {student.selections.map((selection) => (
+                            <span key={`${student.id}-${selection.companyName}`} className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded text-xs">
+                              {selection.companyName}
+                            </span>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1550,14 +890,17 @@ export default function CollegeConnect() {
                         href={student.linkedin.startsWith('http') ? student.linkedin : `https://${student.linkedin}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition"
                       >
                         LinkedIn
                         <ExternalLink className="w-4 h-4" />
                       </a>
                       <button
-                        onClick={() => viewStudentProfile(student.id)}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+                        onClick={() => {
+                          setSelectedStudentId(student.id);
+                          setView('studentProfile');
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition"
                       >
                         <User className="w-4 h-4" />
                         Profile
@@ -1568,8 +911,118 @@ export default function CollegeConnect() {
               ))}
             </div>
           </div>
-        </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function CollegeResult({
+  college,
+  onStudentOpen,
+}: {
+  college: College;
+  onStudentOpen: (studentId: string) => void;
+}) {
+  return (
+    <div className="border border-slate-200 rounded-lg p-4 hover:border-indigo-300 transition">
+      <h4 className="font-semibold text-slate-950 text-lg">{college.name}</h4>
+      <p className="text-sm text-slate-600 mb-3">{college.domain}</p>
+      <div className="space-y-3 mb-4">
+        {college.companies.map((company) => {
+          const selectedStudents = college.students.filter((student) =>
+            company.selectedStudents.includes(student.id),
+          );
+          return (
+            <div key={company.id} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-semibold text-slate-950">{company.name}</span>
+                <span className="text-sm text-slate-600">{company.totalSelections ?? selectedStudents.length} selected</span>
+              </div>
+              {selectedStudents.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {selectedStudents.map((student) => (
+                    <button
+                      key={student.id}
+                      onClick={() => onStudentOpen(student.id)}
+                      className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs hover:bg-emerald-100 transition flex items-center gap-1"
+                    >
+                      <User className="w-3 h-3" />
+                      {student.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+        <span className="flex items-center gap-1">
+          <Users className="w-4 h-4" />
+          {college.students.length} students
+        </span>
+        <span className="flex items-center gap-1">
+          <Briefcase className="w-4 h-4" />
+          {college.companies.length} companies
+        </span>
       </div>
     </div>
   );
 }
+
+function CompanyResult({
+  result,
+  onStudentOpen,
+}: {
+  result: CompanySearchResult;
+  onStudentOpen: (studentId: string) => void;
+}) {
+  return (
+    <div className="border border-slate-200 rounded-lg p-4 hover:border-indigo-300 transition">
+      <h4 className="font-semibold text-slate-950 text-lg mb-3">{result.college.name}</h4>
+      <div className="space-y-2">
+        {result.companies.map((company) => {
+          const selectedStudents = result.college.students.filter((student) =>
+            company.selectedStudents.includes(student.id),
+          );
+
+          return (
+            <div key={company.id} className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <h5 className="font-medium text-emerald-950">{company.name}</h5>
+                  {company.visitDate && (
+                    <p className="text-sm text-emerald-700 flex items-center gap-1 mt-1">
+                      <Calendar className="w-3 h-3" />
+                      Visit: {toDisplayDate(company.visitDate)}
+                    </p>
+                  )}
+                  <p className="text-sm text-emerald-700 mt-2 font-medium">
+                    {company.totalSelections ?? selectedStudents.length} students selected
+                  </p>
+                  {selectedStudents.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-emerald-200">
+                      {selectedStudents.map((student) => (
+                        <button
+                          key={student.id}
+                          onClick={() => onStudentOpen(student.id)}
+                          className="px-3 py-1.5 bg-white border border-emerald-300 text-emerald-800 rounded-lg text-xs hover:bg-emerald-100 transition flex items-center gap-1.5"
+                        >
+                          <User className="w-3 h-3" />
+                          {student.name}
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+

@@ -3,16 +3,19 @@ import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, get, onValue } from 'firebase/database';
 import fs from 'fs';
 import path from 'path';
+import { config } from 'dotenv';
+
+config();
 
 const firebaseConfig = {
-    apiKey: "AIzaSyDewKmEsvryFalR53CMLGrTiem3l6-fCXc",
-    authDomain: "collegeconnect-a3fe0.firebaseapp.com",
-    databaseURL: "https://collegeconnect-a3fe0-default-rtdb.firebaseio.com",
-    projectId: "collegeconnect-a3fe0",
-    storageBucket: "collegeconnect-a3fe0.firebasestorage.app",
-    messagingSenderId: "90391097177",
-    appId: "1:90391097177:web:4d037f831fa4401632e648",
-    measurementId: "G-NXQVGC9ZX2"
+    apiKey: process.env.VITE_FIREBASE_API_KEY,
+    authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+    databaseURL: process.env.VITE_FIREBASE_DATABASE_URL,
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.VITE_FIREBASE_APP_ID,
+    measurementId: process.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);

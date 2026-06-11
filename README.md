@@ -1,158 +1,120 @@
-# 🎓 College Connect App# College Connect App
+# College Connect
 
+College Connect is a real-time placement collaboration platform for students across colleges.
 
+The project has been upgraded from a Firebase-first MVP into a full-stack architecture with a stateless Node.js API, MongoDB, Redis caching, BullMQ async jobs, and realtime client updates.
 
-A comprehensive React application for connecting students across colleges and tracking company placements with **6-layer data protection system**.A React application for connecting students across colleges and tracking company visits.
+## What It Does
 
+- Student registration using college email domains.
+- Dynamic college creation when a new domain joins.
+- Company visit tracking per college.
+- Student selection tracking with profile and LinkedIn views.
+- Cross-college search for colleges and companies.
+- Cached placement snapshots and leaderboards.
+- Async placement-event processing through BullMQ.
+- Realtime UI refresh through Server-Sent Events.
 
+## Architecture
 
-## ✨ Features## Setup Instructions
+- Frontend: React 18, TypeScript, Vite, Tailwind CSS.
+- API: Node.js, Express, stateless JWT auth.
+- Database: MongoDB via Mongoose.
+- Cache and realtime: Redis snapshot cache plus Redis pub/sub.
+- Jobs: BullMQ workers backed by Redis.
+- Deployment scaffold: Docker Compose with API, worker, MongoDB, and Redis.
+- Load test scaffold: k6 placement flow.
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full engineering view.
 
+## Local Setup
 
-- 👥 **Student Management**: Registration with college email, LinkedIn profiles1. **Install Node.js** (if not already installed)
-
-- 🏫 **College Management**: Dynamic college addition and tracking   - Download from https://nodejs.org/
-
-- 🏢 **Company Tracking**: Monitor company visits and student selections   - Install the LTS version
-
-- 🔍 **Advanced Search**: Search across colleges, companies, and students
-
-- 📊 **Statistics Dashboard**: Real-time counts of users, colleges, and companies2. **Install Dependencies**
-
-- 🔐 **Multi-Layer Data Protection**: 6 independent backup systems   ```cmd
-
-   cd C:\Users\Pc\Downloads\college-connect-app
-
-## 🚀 Quick Start   npm install
-
-   ```
-
-### 1. Install Dependencies
-
-```bash3. **Run the Development Server**
-
-npm install   ```cmd
-
-```   npm run dev
-
-   ```
-
-### 2. Configure Firebase
-
-Create `src/firebase.ts` with your Firebase config:4. **Open in Browser**
-
-```typescript   - The app will run at `http://localhost:5173`
-
-import { initializeApp } from 'firebase/app';   - Open this URL in your browser
-
-import { getDatabase } from 'firebase/database';
-
-## Features
-
-const firebaseConfig = {
-
-  // Your Firebase config here- Student registration with college email
-
-};- Add new colleges dynamically
-
-- Track company visits to colleges
-
-export const app = initializeApp(firebaseConfig);- Mark student selections by companies
-
-export const database = getDatabase(app);- Search across colleges and companies
-
-```- View student LinkedIn profiles
-
-
-
-### 3. Run Development Server## Technologies Used
+1. Install dependencies:
 
 ```bash
+npm install
+```
 
-npm run dev- React 18
-
-```- TypeScript
-
-Open `http://localhost:5173` in your browser.- Vite
-
-- Tailwind CSS
-
-### 4. Build for Production
+2. Create local env:
 
 ```bash
-npm run build
+copy .env.example .env
 ```
 
-## 🛡️ Data Protection System (6 Layers)
+3. Start MongoDB and Redis:
 
-| Layer | Description | Command |
-|-------|-------------|---------|
-| 1️⃣ Firebase Database | Primary real-time database | Auto |
-| 2️⃣ localStorage Backup | Browser-based emergency backup | Auto |
-| 3️⃣ File Backups | 30-day retention local backups | `npm run backup` |
-| 4️⃣ Real-Time Monitoring | Detects and prevents data loss | Auto |
-| 5️⃣ Firebase Rules | Prevents unauthorized deletion | Auto |
-| 6️⃣ Google Sheets Sync | Real-time spreadsheet backup | `npm run sync:sheets:auto` |
-
-### Backup Commands
 ```bash
-# Create manual backup
-npm run backup
-
-# Check database status
-npm run check:db
-
-# Restore from backup
-npm run restore
-
-# Sync to Google Sheets
-npm run sync:sheets
-
-# Auto-sync to Google Sheets
-npm run sync:sheets:auto
+docker compose up mongo redis
 ```
 
-## 📚 Documentation
+4. Start the API:
 
-- **[BACKUP-GUIDE.md](BACKUP-GUIDE.md)** - Complete backup system guide
-- **[GOOGLE-SHEETS-SETUP.md](GOOGLE-SHEETS-SETUP.md)** - Google Sheets backup setup
-- **[FIREBASE-SECURITY.md](FIREBASE-SECURITY.md)** - Firebase security rules
-
-## 🔧 Tech Stack
-
-- **Frontend**: React 18 + TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-- **Database**: Firebase Realtime Database
-- **Icons**: Lucide React
-- **Backup**: Node.js scripts + Google Sheets API
-
-## 📊 Project Structure
-
-```
-college-connect-app/
-├── src/
-│   ├── CollegeConnect.tsx    # Main app component
-│   ├── firebase.ts            # Firebase configuration
-│   ├── main.tsx               # Entry point
-│   └── index.css              # Global styles
-├── public/
-│   └── recovery.html          # User data recovery page
-├── backups/                   # Automated backups (gitignored)
-├── auto-backup.mjs            # Backup automation
-├── google-sheets-sync.mjs     # Google Sheets sync
-├── auto-sync-sheets.mjs       # Auto Google Sheets sync
-├── monitor-integrity.mjs      # Real-time monitoring
-└── restore-backup.mjs         # Backup restoration
+```bash
+npm run dev:api
 ```
 
-## 🔐 Security Features
+5. Start the worker:
 
-- ✅ Write-once fields (IDs, emails can't be changed)
-- ✅ Deletion prevention (no data can be deleted)
-- ✅ Data validation (email format, field types)
-- ✅ Catastrophic loss prevention (blocks >50% data loss)
-- ✅ Emergency backups (localStorage + Google Sheets)
-- ✅ Real-time monitoring (detects attacks instantly)
+```bash
+npm run dev:worker
+```
+
+6. Start the frontend:
+
+```bash
+npm run dev
+```
+
+Frontend runs on `http://localhost:5173`; API runs on `http://localhost:4000`.
+
+## Docker Stack
+
+Run the backend stack with:
+
+```bash
+docker compose up --build api worker mongo redis
+```
+
+Then run the frontend locally:
+
+```bash
+npm run dev
+```
+
+## Load Testing
+
+Install k6, start the backend stack, then run:
+
+```bash
+npm run load:test
+```
+
+For a deployed target:
+
+```bash
+k6 run -e BASE_URL=https://your-api.example.com load-tests/placement-flow.js
+```
+
+Use those results before claiming exact concurrency or latency numbers.
+
+## Resume Alignment
+
+Implemented now:
+
+- Stateless Node.js backend.
+- MongoDB primary data model.
+- Redis cache for hot placement snapshots and leaderboards.
+- BullMQ/Redis async event pipeline.
+- Realtime update flow decoupled from browser database writes.
+- Dockerized API and worker services for horizontal scaling.
+- k6 load-test scaffold for concurrency evidence.
+
+Still needs real measurement or cloud deployment before exact claims:
+
+- "1,000+ concurrent students"
+- "60% response-time reduction"
+- "AWS deployed"
+- "zero message loss during peak season"
+
+Those are now realistic to prove, but should be measured and documented.
 
